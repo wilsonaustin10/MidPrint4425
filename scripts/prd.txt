@@ -1,0 +1,195 @@
+# Product Requirements Document: Unified Browser Automation Agent 'MidPrint4425'
+
+# Overview
+
+This document outlines the requirements for a unified product combining the 'browser-use' (Python backend) and 'autonomi' (Next.js frontend) projects. The goal is to create an intelligent automation platform where users can provide natural language instructions via a web frontend ('autonomi'). These instructions are processed by a backend agent ('browser-use') that executes the corresponding browser automation tasks using Playwright. The frontend provides an embedded browser view, allowing the user to watch the agent perform the action sequence in real-time.
+
+This product solves the problem of automating complex or repetitive browser tasks without requiring users to write code, offering a simple chat-like interface and visual feedback on the automation process[cite: 16, 23, 24, 154, 155, 1639, 2303]. It is valuable for both non-technical users needing automation and technical users looking to rapidly prototype or execute browser-based workflows[cite: 25, 154].
+
+# Core Features
+
+- Natural Language Prompt Input (Frontend):
+  - What it does: Allows users to enter task instructions in plain English via a chat interface[cite: 16, 20].
+  - Why it's important: Makes browser automation accessible without coding knowledge[cite: 25].
+  - How it works: The Next.js frontend ('autonomi') captures user input through a chat box component (`ChatBox.tsx`) and sends it to the backend[cite: 7, 1495].
+
+- Backend Agent Execution (Backend):
+  - What it does: The Python backend ('browser-use') receives the prompt, uses an LLM to interpret the task and plan actions, and controls a browser instance (via Playwright) to execute the steps[cite: 1616, 1618].
+  - Why it's important: Provides the core automation capability, translating language into browser actions[cite: 15].
+  - How it works: The backend agent service (`agent/service.py`) interacts with an LLM, manages state, and uses the browser service (`browser/browser.py`, `browser/context.py`) to perform actions like navigation, clicking, and typing[cite: 1616, 1618]. It utilizes a sophisticated DOM service (`dom/service.py`) to understand page structure[cite: 1620].
+
+- Embedded Browser View (Frontend):
+  - What it does: Displays the live view of the browser controlled by the backend agent within the frontend interface[cite: 16, 17].
+  - Why it's important: Gives users direct visual feedback on the agent's actions and the current state of the automated task.
+  - How it works: The frontend ('autonomi') likely uses an iframe or a similar embedding technique (`InteractiveBrowser.tsx`) to display screenshots or potentially a stream from the backend browser instance managed by Playwright[cite: 7, 34, 36, 1405]. Communication is likely handled via WebSockets or frequent polling[cite: 81, 99].
+
+- Real-time Action Visualization:
+  - What it does: Provides visual cues or updates in the frontend corresponding to the agent's actions in the embedded browser (e.g., highlighting clicked elements, showing typed text)[cite: 17, 89].
+  - Why it's important: Enhances user understanding of the automation process and helps in debugging.
+  - How it works: The backend sends state updates (screenshots, DOM info, current URL, action status) to the frontend, which then updates the embedded view and potentially overlays visual indicators[cite: 82, 104]. The 'browser-use' backend has functionality for highlighting elements[cite: 1883, 1930].
+
+- Task Processing & Action Planning (Backend):
+  - What it does: Analyzes the user's natural language prompt, potentially breaks it down into steps (planning), and determines the sequence of browser actions required[cite: 110, 1771].
+  - Why it's important: Translates high-level user intent into concrete, executable browser commands.
+  - How it works: Leverages an LLM (e.g., GPT-4o) via the agent service (`agent/service.py`) and defined system prompts (`agent/system_prompt.md`) to generate action sequences based on the current browser state and task goal[cite: 1616, 1766]. May involve a separate planner LLM[cite: 1628].
+
+# User Experience
+
+- User Personas:
+  - Individuals needing to automate repetitive web tasks (data entry, checking information, form submissions).
+  - QA testers automating browser test cases.
+  - Data scientists/analysts performing web scraping or data collection.
+  - Developers needing rapid prototyping of browser automation scripts[cite: 25].
+
+- Key User Flows:
+  1. Task Initiation: User opens the web app, sees a chat input (`ChatBox.tsx`) and an embedded browser view (`InteractiveBrowser.tsx`)[cite: 7, 1404, 1405]. User types a task prompt (e.g., "Log into website X and find the latest report") and submits[cite: 20].
+  2. Execution & Visualization: The frontend sends the prompt to the backend[cite: 1298]. The backend agent ('browser-use') starts executing the task (e.g., navigates to website X)[cite: 1616]. The frontend's embedded browser view updates in real-time (or near real-time via screenshots) showing the agent's actions[cite: 17, 1405]. The user watches the agent fill in login details (using placeholders for sensitive data if configured) and navigate to the reports section.
+  3. Completion/Output: The agent completes the task (e.g., downloads the report or extracts information). The final result or a status message is displayed in the chat interface[cite: 175, 1496]. The embedded browser shows the final state[cite: 1405].
+
+- UI/UX Considerations:
+  - Clean interface with a prominent prompt input field[cite: 1411].
+  - Clear, responsive embedded browser view[cite: 1438].
+  - Real-time status indicators (loading, executing action, paused, completed)[cite: 1434].
+  - Ability to view agent logs or step-by-step actions[cite: 1467].
+  - Secure handling of credentials (if login is required)[cite: 1475].
+  - Intelligent focus management for seamless interaction between chat and browser view[cite: 60, 163, 166, 169, 1379].
+
+# Technical Architecture
+
+- System Components:
+  - Frontend: Next.js application ('autonomi') responsible for UI, chat interface, prompt input, and displaying the embedded browser view[cite: 206, 208]. Uses components like `ChatBox.tsx` and `InteractiveBrowser.tsx`[cite: 7].
+  - Backend: Python application ('browser-use') acting as the agent runner[cite: 1615]. Manages browser instances, interacts with the LLM, processes DOM, executes actions, and handles state[cite: 1616, 1618, 1619, 1620]. Core components include `agent/service.py`, `browser/browser.py`, `controller/service.py`, `dom/service.py`.
+  - Browser Automation: Playwright is used by the backend for browser control[cite: 15, 1618]. Specific configurations are used to handle browser security and detection[cite: 35, 1851].
+  - LLM: An external LLM service (e.g., OpenAI, Anthropic, Gemini) integrated via LangChain for interpreting prompts and planning actions[cite: 17, 28, 1146, 1148, 1663]. Separate models can be used for planning, execution, and extraction[cite: 2489].
+  - Communication Layer: API (likely REST/HTTP for tasks, potentially WebSockets for real-time updates) between frontend and backend[cite: 81, 86, 89, 99]. Endpoints like `/api/chat` and `/api/computer-use` are mentioned in 'autonomi'[cite: 4, 5, 1158, 1165].
+
+- Data Models:
+  - `UserPrompt`: Text input from the user[cite: 1154].
+  - `AgentTask`: Processed task, potentially with steps.
+  - `BrowserState`: URL, Title, DOM structure (potentially simplified/processed), Screenshot (base64), Interactive Elements (positions, attributes), Tab information[cite: 1613, 1999].
+  - `Action`: Specific browser command (e.g., click, type, navigate) with parameters (selector, URL, text)[cite: 1606]. `ActionModel` in `browser-use` defines the structure[cite: 2050].
+  - `AgentOutput`: LLM response including evaluation, memory, next goal, and action(s)[cite: 1796].
+  - `AgentHistory`: Record of steps taken, including state, action, result, and metadata[cite: 1798].
+
+- APIs and Integrations:
+  - Frontend -> Backend API:
+    - Submit task prompt, receive agent status updates, get browser state (screenshots, URL, etc.)[cite: 71, 1298, 1305]. Endpoints like `/api/chat` and `/api/computer-use` are mentioned in 'autonomi'[cite: 4, 5, 1158, 1165].
+  - Backend -> LLM API:
+    - Send prompts (system, user, history, current state) to LLM, receive action plans/commands[cite: 1153, 1190]. Uses LangChain models[cite: 1663].
+  - Backend -> Browser API:
+    - Uses Playwright library for browser control (launch, navigate, click, type, screenshot, DOM access)[cite: 35, 36, 1079, 1081, 1091, 1093, 1125, 1618].
+
+- Infrastructure Requirements:
+  - Hosting environment for the Next.js frontend (e.g., Vercel)[cite: 212].
+  - Hosting environment for the Python backend (capable of running Playwright and Python >= 3.11)[cite: 1663]. Docker support is considered (`IN_DOCKER` env var)[cite: 172, 1851].
+  - LLM API access (e.g., OpenAI API key)[cite: 27, 1642].
+  - Potentially separate infrastructure for managing browser instances if scaling beyond simple local execution (e.g., browser pool)[cite: 1508].
+
+# Development Roadmap
+
+- MVP Requirements:
+  1. Backend Agent Foundation: Setup basic Python agent (`browser-use`) with Playwright. Implement core actions: `go_to_url`, `click_element_by_index`, `input_text`, `done`[cite: 2006, 2009, 2013].
+  2. Frontend Shell: Create basic Next.js app (`autonomi`) with a text input for prompts and a placeholder for the browser view[cite: 208, 1404, 1405].
+  3. Basic API: Simple HTTP endpoint for frontend to send prompts to the backend and receive a task ID/status[cite: 1158, 1165].
+  4. LLM Integration (Basic): Backend uses LLM to parse simple prompts into a single action (navigate, click, type)[cite: 1153, 1190].
+  5. DOM Processing (Minimal): Backend extracts basic interactive elements with indices[cite: 1620, 2253].
+  6. Embedded View (Basic): Frontend displays the current URL reported by the backend[cite: 1405]. Update via polling.
+  7. End-to-End Flow: User types URL -> Agent navigates -> Frontend shows new URL. User types "click element 5" -> Agent clicks -> Frontend shows resulting URL.
+
+- Phase 2 Enhancements:
+  1. Browser View Streaming: Implement screenshot streaming (base64 over WebSocket or frequent polling) from backend to frontend's `InteractiveBrowser.tsx`[cite: 1095, 1438].
+  2. Enhanced Actions: Add `scroll`, `select_dropdown_option`, handle file uploads, support more complex element selectors (text, CSS, XPath)[cite: 2014, 2029, 2570, 2579].
+  3. Multi-Step Tasks: Improve LLM prompting and state management (`agent/message_manager`) to handle sequences of actions[cite: 1770, 1815].
+  4. Visual Feedback: Frontend highlights the target element in the screenshot/view based on backend info before an action[cite: 1930, 2085].
+  5. State Management: Robust handling of browser state (tabs, history) in backend and frontend synchronization[cite: 1047, 1999].
+
+- Future Enhancements:
+  - Agent Memory & Planning (summarization, RAG, planner LLM)[cite: 1650, 1813].
+  - Human-in-the-loop interaction and error recovery[cite: 54, 146].
+  - Support for custom functions/tools[cite: 1626, 2425].
+  - Advanced DOM analysis (handling iframes, shadow DOM better)[cite: 1628, 2181, 2234].
+  - Improved GIF generation for history visualization[cite: 1703].
+  - UI for managing/editing saved scripts/workflows[cite: 40].
+  - Integration with external services (e.g., Discord, Slack, n8n)[cite: 1630, 1637, 2515].
+  - Fine-tuning models for specific tasks[cite: 1651].
+  - Support for different browsers beyond Chromium[cite: 1844].
+
+# Project Setup
+
+This section outlines the required steps to set up the project repositories for development.
+
+- Source Code Repositories:
+  - Backend Repository:
+    - Repository URL: https://github.com/browser-use/browser-use.git
+    - Clone command: `git clone https://github.com/browser-use/browser-use.git`
+    - Contains the Python backend, Playwright integration, agent logic, and browser control functionality
+  
+  - Frontend Repository:
+    - Repository URL: https://github.com/wilsonaustin10/autonomi.git
+    - Clone command: `git clone https://github.com/wilsonaustin10/autonomi.git`
+    - Contains the Next.js frontend with chat interface and browser view components
+
+- Repository Structure:
+  - Backend (`browser-use`):
+    - `browser_use/`: Core Python package
+    - `browser/`: Browser management and Playwright integration
+    - `agent/`: LLM agent implementation and prompt management
+    - `dom/`: DOM processing and element extraction
+    - `controller/`: Action registry and execution
+    - Additional utilities and configuration files
+
+  - Frontend (`autonomi`):
+    - `components/`: React components including `ChatBox.tsx` and `InteractiveBrowser.tsx`
+    - `pages/`: Next.js page components and routing
+    - `api/`: API route handlers for communicating with the backend
+    - `public/`: Static assets
+    - `styles/`: CSS and styling
+
+- Initial Setup Procedure:
+  1. Clone both repositories into separate directories
+  2. Set up development environments for each repository according to their respective README instructions
+  3. Configure environment variables for backend LLM access and other settings
+  4. Establish the integration points between the two repositories as detailed in the Logical Dependency Chain section
+
+- Integration Strategy:
+  - During development, run both repositories side by side with appropriate API endpoints configured
+  - For production deployment, consider containerizing both components or using a monorepo approach
+  - Ensure proper authentication and security between the frontend and backend components
+
+# Logical Dependency Chain
+
+1. Backend Core: Setup `browser-use` Python environment, Playwright installation, basic `Agent` and `Browser` classes[cite: 1616, 1618].
+2. Frontend Core: Setup `autonomi` Next.js project, basic layout with `ChatBox` and `InteractiveBrowser` placeholders[cite: 206, 1404, 1405].
+3. API Contract: Define simple API for sending prompt and getting basic status/URL updates[cite: 86, 1158, 1165].
+4. MVP Backend Actions: Implement `go_to_url` action in `browser-use` controller[cite: 2006].
+5. MVP Frontend Input: Implement sending prompt from `ChatBox` to backend API[cite: 1298, 1305].
+6. MVP End-to-End (Navigation): Connect flow: Frontend prompt -> Backend -> `go_to_url` -> Backend sends new URL -> Frontend displays URL[cite: 1405].
+7. MVP DOM & Actions: Implement basic DOM element extraction (`dom/service.py`) and `click_element_by_index`, `input_text` actions[cite: 1620, 2009, 2013].
+8. MVP LLM Integration: Integrate LLM to parse "go to X", "click Y", "type Z in Y" prompts into single actions[cite: 1148, 1194].
+9. MVP End-to-End (Interaction): Connect flow for click/type actions, updating URL state[cite: 1348].
+10. Embedded Browser View: Implement screenshot capture (`take_screenshot`) in backend and display in frontend `InteractiveBrowser.tsx`[cite: 1405, 1927]. Start with polling, move to WebSockets if feasible.
+11. Multi-Step Handling: Enhance backend agent and LLM interaction to support sequences of actions based on state[cite: 1770, 1815].
+12. Advanced Features: Build upon the MVP, adding features from the roadmap iteratively.
+
+# Risks and Mitigations
+
+- Technical Challenge - Real-time Browser View: Streaming a live browser view efficiently and reliably is complex.
+  - Mitigation: Start with periodic screenshot updates[cite: 1431]. Investigate technologies like WebRTC or optimized WebSocket streaming if higher fidelity is required later. Leverage existing screenshot capabilities in `browser-use`[cite: 1927].
+- Technical Challenge - Robust Action Execution: Handling dynamic web pages, complex interactions (iframes, shadow DOM), and avoiding bot detection requires sophisticated Playwright usage.
+  - Mitigation: Utilize Playwright's features (e.g., waiting strategies, stable selectors)[cite: 1196, 2579, 2960]. Leverage `browser-use`'s existing DOM processing and action execution logic[cite: 1620, 2043]. Implement robust error handling and retries[cite: 114, 146, 1842]. Start with simpler websites.
+- MVP Scope Creep: Difficulty in keeping the initial version truly minimal.
+  - Mitigation: Strictly adhere to the MVP requirements defined above. Prioritize the core prompt -> execute -> view (URL only) flow first before adding screenshot streaming or complex actions.
+- LLM Reliability & Cost: LLM interpretation of prompts and generated actions might be unreliable or inconsistent[cite: 142]. Vision models add cost[cite: 2444].
+  - Mitigation: Refine system prompts iteratively[cite: 146, 1766]. Implement validation steps (`validate_output` flag exists)[cite: 2542]. Offer options for different models (including cheaper/local ones if feasible)[cite: 2489]. Allow disabling vision[cite: 2444].
+- Integration Complexity: Merging frontend state management (Next.js/React) with asynchronous backend agent state.
+  - Mitigation: Define clear API contracts[cite: 86]. Use robust state synchronization mechanisms (e.g., WebSockets with defined events, or polling with versioning/timestamps)[cite: 81, 99]. Leverage existing API structures in 'autonomi'[cite: 4, 5].
+
+# Appendix
+
+- Browser Launch Arguments: The 'browser-use' backend utilizes specific Chromium arguments for headless mode, Docker compatibility, disabling security features, and deterministic rendering (see `browser/chrome.py`)[cite: 1851, 1852, 1857, 1858]. These should be maintained and configured appropriately for the deployment environment.
+- Existing NLP/Agent Logic: 'autonomi' includes logic for NLP task detection (`task-detector.js`) and script generation (`agent-generator/`) which might be reusable or adaptable for the backend[cite: 18, 31]. 'browser-use' has its own agent service and prompt structure (`agent/service.py`, `agent/system_prompt.md`)[cite: 1616, 1766]. The 'browser-use' logic seems more aligned with the target architecture.
+- DOM Representation: 'browser-use' uses a specific JS script (`dom/buildDomTree.js`) to extract a DOM tree and create a selector map[cite: 2253]. This representation is crucial for the agent's interaction and state understanding.
+- Action Registry: The `browser-use` controller uses a registry (`controller/registry/service.py`) to define and manage available actions, including support for custom functions and filters (domain/page-specific)[cite: 2041, 2046].
+- Telemetry: 'browser-use' includes optional, anonymized telemetry using PostHog (`telemetry/service.py`)[cite: 1621, 2274].
+- Frontend Framework: 'autonomi' is built using Next.js with TypeScript and specific UI components (`components/ui/`)[cite: 206, 1491, 1495, 1496, 1497].
+- Memory: 'browser-use' includes an optional memory system using Mem0 (`agent/memory/service.py`) to handle long-running tasks[cite: 1813, 2379].

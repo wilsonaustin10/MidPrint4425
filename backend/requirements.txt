@@ -1,0 +1,12 @@
+playwright==1.40.0
+langchain==0.0.330
+langchain-core==0.1.5
+fastapi==0.104.1
+uvicorn==0.24.0
+python-dotenv==1.0.0
+anthropic==0.5.0
+numpy==1.24.3
+beautifulsoup4==4.12.2
+aiohttp==3.8.6
+pydantic==2.4.2
+pytest==7.4.3 
