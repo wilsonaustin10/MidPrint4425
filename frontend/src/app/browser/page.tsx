@@ -40,7 +40,7 @@ export default function BrowserPage() {
   const [actionIndicators, setActionIndicators] = useState<ActionIndicator[]>([]);
   const [transitionState, setTransitionState] = useState<'idle' | 'starting' | 'completed' | 'failed'>('idle');
   
-  const { tasks, createTask, cancelTask, getTask } = useTasks();
+  const { tasks, createTask, cancelTask, getTask, subscribeToTask } = useTasks();
   const { showNotification } = useNotification();
 
   const fetchTask = useCallback((taskId: string) => {
@@ -213,7 +213,7 @@ export default function BrowserPage() {
         }
       }
     }
-  }, [tasks.activeTask, showNotification]);
+  }, [tasks.activeTask, subscribeToTask, showNotification]);
   
   useEffect(() => {
     let intervalId: NodeJS.Timeout;

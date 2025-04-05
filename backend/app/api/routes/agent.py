@@ -12,6 +12,7 @@ from app.agent.service import agent_service
 from app.services.task_manager import task_manager, Task, TaskStatus
 from app.api.auth import get_api_key, get_authenticated_user
 from app.core.config import settings
+from app.browser.browser import browser_manager
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -567,14 +568,23 @@ async def get_current_screenshot(
 ):
     """Get the most recent screenshot."""
     try:
-        if not agent_service.current_state["initialized"]:
-            raise HTTPException(status_code=400, detail="Browser not initialized")
+        # Check if browser is initialized
+        if not browser_manager.is_initialized:
+            # Return a service unavailable status code instead of a bad request
+            # since this is a temporary condition that can be resolved
+            raise HTTPException(
+                status_code=503, 
+                detail="Browser not initialized. Please try again later or initialize the browser first."
+            )
             
         screenshot = await agent_service.capture_screenshot(full_page=True)
         return {
             "status": "success",
             "screenshot": screenshot.get("screenshot")
         }
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is to preserve status codes
+        raise
     except Exception as e:
         logger.error(f"Error getting screenshot: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error getting screenshot: {str(e)}") 

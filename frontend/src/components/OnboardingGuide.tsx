@@ -56,6 +56,11 @@ export const OnboardingGuide: React.FC<OnboardingGuideProps> = ({
       }
     },
     {
+      title: 'Session Management',
+      description: 'MidPrint automatically saves your recent tasks and browsing history. You can pick up where you left off at any time. All your data is stored locally on your device and not shared with any third parties.',
+      image: '/images/onboarding/browser.svg',
+    },
+    {
       title: 'Sample Tasks',
       description: 'Here are some examples of what you can ask the agent to do:\n• "Go to google.com and search for cats"\n• "Fill out a contact form"\n• "Find the top news headlines"',
       image: '/images/onboarding/examples.svg',

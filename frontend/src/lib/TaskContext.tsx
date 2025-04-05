@@ -34,6 +34,7 @@ interface TaskContextValue {
   getTask: (taskId: string) => Task | null;
   isLoading: boolean;
   error: string | null;
+  subscribeToTask: (taskId: string) => void;
 }
 
 // Default context value
@@ -44,6 +45,7 @@ const defaultValue: TaskContextValue = {
   getTask: () => null,
   isLoading: false,
   error: null,
+  subscribeToTask: () => {},
 };
 
 // Create context
@@ -225,6 +227,7 @@ export const TaskProvider: React.FC<TaskProviderProps> = ({ children }) => {
     getTask,
     isLoading,
     error,
+    subscribeToTask,
   };
 
   return (

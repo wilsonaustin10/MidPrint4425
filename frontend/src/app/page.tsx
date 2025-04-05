@@ -43,6 +43,10 @@ export default function Home() {
             AI-powered browser automation agent
           </p>
 
+          <div className="mt-6 text-lg text-gray-600 max-w-3xl">
+            <p>MidPrint allows you to automate web tasks using natural language instructions. Simply describe what you want to do in the chat, and watch the AI agent perform the actions in the browser view.</p>
+          </div>
+
           <div className="flex flex-wrap items-center justify-around max-w-4xl mt-6 sm:w-full">
             <Link href="/chat" 
                   className="p-6 mt-6 text-left border w-full md:w-96 rounded-xl hover:text-blue-600 focus:text-blue-600 hover:border-blue-600 transition-colors">
@@ -70,6 +74,17 @@ export default function Home() {
             <div className="bg-white p-6 rounded-lg shadow-sm border">
               <RecentUrlsList onSelectUrl={handleSelectUrl} />
             </div>
+          </div>
+
+          {/* Session Management Help */}
+          <div className="mt-12 bg-blue-50 p-6 rounded-lg shadow-sm border max-w-4xl">
+            <h3 className="text-xl font-semibold text-blue-800 mb-2">Your Session</h3>
+            <p className="text-blue-700 mb-4">
+              Your recent tasks and browser history are automatically saved to your session. You can continue where you left off at any time.
+            </p>
+            <p className="text-sm text-blue-600">
+              All data is stored locally on your device and is not shared with any third parties.
+            </p>
           </div>
         </main>
 

@@ -6,8 +6,8 @@ import json
 import logging
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from starlette.websockets import WebSocketState
 import uuid
-from fastapi import WebSocketState
 
 from app.services.websocket_manager import websocket_manager
 from app.services.task_manager import task_manager
