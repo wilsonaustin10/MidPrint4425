@@ -1,0 +1,70 @@
+# Product Requirements Document: MidPrint Agent Fixes and Enhancements
+
+# Overview
+This document outlines the tasks required to fix the identified issues preventing the MidPrint frontend (`autonomi`) from successfully initiating tasks on the backend agent (`browser-use`) and to implement real-time browser view streaming. The goal is to achieve the core functionality where a user prompt in the frontend triggers backend browser automation, with the results visualized in near real-time on the frontend.
+
+# Core Tasks
+
+## Phase 1: Fix Core Functionality (High Priority)
+
+1.  **Task: Fix Frontend Task Initiation**
+    * **Description:** Modify the frontend code to correctly call the backend API endpoint (`/api/v1/agent/execute`) when a user submits a prompt in the chat interface.
+    * **Details:**
+        * Review `frontend/src/lib/TaskContext.tsx` and the `createTask` function[cite: 2426, 2440]. Ensure it calls `agentAPI.executeTask` (from `frontend/src/lib/api.ts` [cite: 2345]) with the user's prompt/description.
+        * Review `frontend/src/components/ChatBox.tsx` and the `handleMessageSent` function [cite: 2029, 2040] to confirm it triggers the corrected `createTask` or directly calls the necessary API.
+        * Use the `task_id` returned by the backend API response to manage local state and WebSocket subscriptions[cite: 336].
+    * **Test Strategy:** Submit a simple prompt (e.g., "go to google.com") in the frontend chat. Verify (via backend logs or network inspection) that the `/agent/execute` endpoint is called correctly with the prompt content. Verify a task is created in the backend `task_manager`.
+
+2.  **Task: Implement Backend Screenshot Streaming via WebSocket**
+    * **Description:** Modify the backend agent service to send screenshot updates over the WebSocket connection during task execution.
+    * **Details:**
+        * In `backend/app/agent/service.py`, within action execution methods (like `_go_to_url`, `_click_element`, `_input_text` in `controller/service.py` or corresponding agent methods handling steps [cite: 215, 226, 543, 546, 550]), capture a screenshot *after* the action completes successfully[cite: 1927].
+        * Use the `websocket_manager` (imported in `main.py` and potentially accessible via context or dependency injection) to broadcast a specific message type (e.g., `browser_screenshot_update`) containing the `task_id` and the base64 screenshot data[cite: 69, 999, 1021]. This should likely be broadcast to task-specific subscribers.
+    * **Test Strategy:** Execute a multi-step task via API call. Connect a separate WebSocket client, subscribe to the task, and verify that screenshot messages are received during execution, not just at the end.
+
+3.  **Task: Implement Frontend WebSocket Handling for Screenshots**
+    * **Description:** Update the frontend WebSocket logic to receive screenshot updates and display them in the `InteractiveBrowser` component.
+    * **Details:**
+        * Modify the WebSocket message handling logic (likely in `frontend/src/lib/websocket.ts` or `frontend/src/lib/TaskContext.tsx`) to recognize the new `browser_screenshot_update` message type[cite: 2449, 2432, 2498].
+        * When a screenshot message is received for a subscribed task, update the state that provides the `screenshot` prop to the `InteractiveBrowser.tsx` component[cite: 2085, 2105].
+        * Remove or disable the existing `setInterval` polling mechanism for screenshots in `InteractiveBrowser.tsx`[cite: 1981].
+    * **Test Strategy:** Run the frontend and execute a task. Verify that the browser view updates dynamically during the task execution based on WebSocket messages, not just polling.
+
+## Phase 2: Enhance Streaming and Visualization (Medium Priority)
+
+4.  **Task: Enhance Backend Browser State Streaming**
+    * **Description:** Expand the backend WebSocket broadcasting to include other relevant browser state updates like URL and page title changes.
+    * **Details:**
+        * Similar to screenshot streaming, after actions that change the URL or page state (e.g., navigation, clicks causing navigation), send messages (e.g., `browser_state_update`) via the `websocket_manager` containing the `task_id`, new `currentUrl`, and `pageTitle`.
+    * **Test Strategy:** Execute tasks that cause navigation. Verify corresponding `browser_state_update` messages are sent via WebSocket.
+
+5.  **Task: Enhance Frontend WebSocket Handling for Browser State**
+    * **Description:** Update the frontend to handle and display streamed URL and page title updates.
+    * **Details:**
+        * Update WebSocket handling logic to process `browser_state_update` messages.
+        * Update the state that provides `currentUrl` and `pageTitle` props to `InteractiveBrowser.tsx` [cite: 2105] based on received messages.
+    * **Test Strategy:** Run the frontend and execute navigation tasks. Verify the URL bar and title display update in near real-time based on WebSocket messages.
+
+## Phase 3: Refinement and Testing (Low Priority)
+
+6.  **Task: Review/Expand Agent Action Handling**
+    * **Description:** Ensure the backend agent's core execution logic (`execute_from_natural_language` and `execute_action` in `agent/service.py`) can correctly handle the full range of actions intended for LLM control, potentially mapping them directly to the `controller_service`.
+    * **Details:**
+        * Review the logic in `execute_action` [cite: 254] and how it's called, comparing it against the actions registered in `controller/service.py`[cite: 529].
+        * Refactor if necessary to allow the LLM to directly invoke actions like `get_dom` or `wait` if needed, rather than only the currently implemented subset, or ensure the `execute_step` logic handles this mapping correctly via the controller[cite: 226].
+    * **Test Strategy:** Craft test prompts designed to invoke less common actions (like 'wait 5 seconds' or 'get the page source'). Verify the agent executes them correctly via backend logs.
+
+7.  **Task: Refine Frontend Visual Feedback**
+    * **Description:** Improve the visual indicators (clicks, typing, highlights) in `InteractiveBrowser.tsx` using the streamed WebSocket data for better real-time feedback.
+    * **Details:**
+        * Modify the backend to optionally send coordinates or selectors related to actions (e.g., click coordinates, input field selector).
+        * Update `InteractiveBrowser.tsx` [cite: 2085] to use this streamed data to trigger `highlightElement`, `addClickIndicator`, etc., instead of potentially relying only on task result data[cite: 1966, 1970].
+    * **Test Strategy:** Execute various interaction tasks (clicks, typing). Verify that visual indicators appear promptly and accurately reflect the agent's actions based on WebSocket data.
+
+8.  **Task: End-to-End Testing and Debugging**
+    * **Description:** Perform comprehensive testing of the entire workflow from user prompt to visualized execution.
+    * **Details:**
+        * Test various prompts (simple navigation, multi-step forms, searches).
+        * Verify state synchronization between frontend and backend.
+        * Debug any remaining issues in communication, action execution, or visualization.
+    * **Test Strategy:** Successfully execute a range of defined test case prompts, observing correct visualization and task completion status.

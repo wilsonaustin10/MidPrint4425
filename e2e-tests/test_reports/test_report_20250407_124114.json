@@ -1,0 +1,55 @@
+{
+  "timestamp": "2025-04-07T12:37:43.645475",
+  "results": [
+    {
+      "test_name": "test_nav_01",
+      "description": "Simple URL navigation test",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T12:38:13.832482",
+      "metrics": {
+        "Test Result": "FAILED",
+        "API Response Time": 0.01,
+        "errors": [
+          "No screenshot update received",
+          "URL state not synchronized",
+          "Page title not synchronized"
+        ]
+      }
+    },
+    {
+      "test_name": "test_form_01",
+      "description": "Form interaction test with username/password",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T12:39:14.187052",
+      "metrics": {
+        "Test Result": "FAILED",
+        "API Response Time": 0.04,
+        "Typing Indicators Received": "0",
+        "Total Action Feedback Messages": "0",
+        "errors": [
+          "No screenshot update received",
+          "No typing feedback received",
+          "Form submission action not detected"
+        ]
+      }
+    },
+    {
+      "test_name": "test_flow_01",
+      "description": "Multi-step search-click-extract workflow",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T12:41:14.461289",
+      "metrics": {
+        "Test Result": "FAILED",
+        "API Response Time": 0.01,
+        "Screenshots Received": 0,
+        "Action Feedback Messages": 0,
+        "errors": [
+          "Step navigation did not complete",
+          "Step search did not complete",
+          "Step click_result did not complete",
+          "Step extract_data did not complete"
+        ]
+      }
+    }
+  ]
+}

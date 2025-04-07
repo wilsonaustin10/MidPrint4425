@@ -22,10 +22,23 @@ class LLMResponseParser:
     
     # Define valid actions and their required parameters
     VALID_ACTIONS = {
+        # Navigation actions
         "go_to_url": ["url"],
+        
+        # Interaction actions
+        "click_element": ["selector"],
         "click_element_by_index": ["element_index"],
-        "input_text": ["element_index", "text"],
+        "input_text": ["selector", "text"],
+        
+        # Extraction actions
+        "get_dom": [],
+        "capture_screenshot": [],
+        
+        # Utility actions
+        "wait": ["time"],
         "done": [],
+        
+        # LLM planning actions
         "plan_task": ["steps", "thought"],
         "execute_step": ["step_index", "action", "parameters"]
     }
@@ -144,17 +157,37 @@ class LLMResponseParser:
                 except (ValueError, TypeError):
                     raise ActionValidationError(f"Invalid element_index: {element_index}, must be an integer")
         
+        if action == "click_element":
+            selector = parameters.get("selector")
+            if not isinstance(selector, str) or not selector.strip():
+                raise ActionValidationError(f"Invalid selector: {selector}, must be a non-empty string")
+                
+            # Add optional parameter validation
+            if "timeout" in parameters:
+                timeout = parameters.get("timeout")
+                if not isinstance(timeout, int) and not (isinstance(timeout, str) and timeout.isdigit()):
+                    try:
+                        parameters["timeout"] = int(timeout)
+                    except (ValueError, TypeError):
+                        raise ActionValidationError(f"Invalid timeout: {timeout}, must be an integer")
+        
         if action == "input_text":
-            element_index = parameters.get("element_index")
-            if not isinstance(element_index, int) and not (isinstance(element_index, str) and element_index.isdigit()):
-                try:
-                    parameters["element_index"] = int(element_index)
-                except (ValueError, TypeError):
-                    raise ActionValidationError(f"Invalid element_index: {element_index}, must be an integer")
+            selector = parameters.get("selector")
+            if not isinstance(selector, str) or not selector.strip():
+                raise ActionValidationError(f"Invalid selector: {selector}, must be a non-empty string")
             
             text = parameters.get("text")
             if not isinstance(text, str):
                 raise ActionValidationError(f"Invalid text: {text}, must be a string")
+                
+            # Add optional parameter validation
+            if "delay" in parameters:
+                delay = parameters.get("delay")
+                if not isinstance(delay, int) and not (isinstance(delay, str) and delay.isdigit()):
+                    try:
+                        parameters["delay"] = int(delay)
+                    except (ValueError, TypeError):
+                        raise ActionValidationError(f"Invalid delay: {delay}, must be an integer")
         
         if action == "go_to_url":
             url = parameters.get("url")
@@ -169,6 +202,48 @@ class LLMResponseParser:
                 else:
                     parameters["url"] = f"https://{url}"
                 logger.info(f"Fixed URL: {parameters['url']}")
+                
+            # Add optional parameter validation
+            if "wait_until" in parameters:
+                wait_until = parameters.get("wait_until")
+                valid_wait_options = ["networkidle", "load", "domcontentloaded"]
+                if not isinstance(wait_until, str) or wait_until not in valid_wait_options:
+                    # Default to networkidle if invalid
+                    parameters["wait_until"] = "networkidle"
+                    logger.info(f"Defaulting wait_until to 'networkidle'")
+        
+        if action == "wait":
+            time_param = parameters.get("time")
+            if not isinstance(time_param, int) and not (isinstance(time_param, str) and time_param.isdigit()):
+                try:
+                    parameters["time"] = int(time_param)
+                except (ValueError, TypeError):
+                    raise ActionValidationError(f"Invalid time: {time_param}, must be an integer (milliseconds)")
+            
+            # Ensure time is reasonable (between 100ms and 30s)
+            time_value = int(parameters["time"])
+            if time_value < 100:
+                parameters["time"] = 100
+                logger.info(f"Adjusted wait time to minimum 100ms")
+            elif time_value > 30000:
+                parameters["time"] = 30000
+                logger.info(f"Adjusted wait time to maximum 30000ms (30s)")
+                
+        if action == "capture_screenshot":
+            # Add optional parameter validation
+            if "full_page" in parameters:
+                full_page = parameters.get("full_page")
+                if not isinstance(full_page, bool):
+                    try:
+                        # Convert string 'true'/'false' to boolean
+                        if isinstance(full_page, str):
+                            parameters["full_page"] = full_page.lower() == 'true'
+                        else:
+                            parameters["full_page"] = bool(full_page)
+                    except (ValueError, TypeError):
+                        # Default to True if conversion fails
+                        parameters["full_page"] = True
+                        logger.info(f"Defaulting full_page to True")
                 
         if action == "plan_task":
             steps = parameters.get("steps")

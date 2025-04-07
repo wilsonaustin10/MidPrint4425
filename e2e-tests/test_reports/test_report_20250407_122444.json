@@ -1,0 +1,48 @@
+{
+  "timestamp": "2025-04-07T12:24:44.212093",
+  "results": [
+    {
+      "test_name": "test_nav_01",
+      "description": "Simple URL navigation test",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T12:24:44.343911",
+      "metrics": {
+        "Test Result": "FAILED",
+        "- API error": "422 - {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"task\"],\"msg\":\"Field required\",\"input\":{\"prompt\":\"Navigate to https://www.example.com\",\"model\":\"gpt-3.5-turbo\",\"max_steps\":5},\"url\":\"https://errors.pydantic.dev/2.10/v/missing\"}]}",
+        "errors": [
+          "API error: 422 - {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"task\"],\"msg\":\"Field required\",\"input\":{\"prompt\":\"Navigate to https://www.example.com\",\"model\":\"gpt-3.5-turbo\",\"max_steps\":5},\"url\":\"https://errors.pydantic.dev/2.10/v/missing\"}]}"
+        ]
+      }
+    },
+    {
+      "test_name": "test_form_01",
+      "description": "Form interaction test with username/password",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T12:24:44.465180",
+      "metrics": {
+        "Test Result": "FAILED",
+        "Typing Indicators Received": "0",
+        "Total Action Feedback Messages": "0",
+        "- API error": "422 - {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"task\"],\"msg\":\"Field required\",\"input\":{\"prompt\":\"Go to https://httpbin.org/forms/post, fill out the form with username 'testuser' and password 'testpassword123', then submit the form.\",\"model\":\"gpt-3.5-turbo\",\"max_steps\":10},\"url\":\"https://errors.pydantic.dev/2.10/v/missing\"}]}",
+        "errors": [
+          "API error: 422 - {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"task\"],\"msg\":\"Field required\",\"input\":{\"prompt\":\"Go to https://httpbin.org/forms/post, fill out the form with username 'testuser' and password 'testpassword123', then submit the form.\",\"model\":\"gpt-3.5-turbo\",\"max_steps\":10},\"url\":\"https://errors.pydantic.dev/2.10/v/missing\"}]}"
+        ]
+      }
+    },
+    {
+      "test_name": "test_flow_01",
+      "description": "Multi-step search-click-extract workflow",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T12:24:44.582516",
+      "metrics": {
+        "Test Result": "FAILED",
+        "Screenshots Received": 0,
+        "Action Feedback Messages": 0,
+        "- API error": "422 - {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"task\"],\"msg\":\"Field required\",\"input\":{\"prompt\":\"Go to https://www.wikipedia.org, search for 'Python programming language', click on the first relevant result, and extract the first paragraph of content about Python programming.\",\"model\":\"gpt-3.5-turbo\",\"max_steps\":15},\"url\":\"https://errors.pydantic.dev/2.10/v/missing\"}]}",
+        "errors": [
+          "API error: 422 - {\"detail\":[{\"type\":\"missing\",\"loc\":[\"body\",\"task\"],\"msg\":\"Field required\",\"input\":{\"prompt\":\"Go to https://www.wikipedia.org, search for 'Python programming language', click on the first relevant result, and extract the first paragraph of content about Python programming.\",\"model\":\"gpt-3.5-turbo\",\"max_steps\":15},\"url\":\"https://errors.pydantic.dev/2.10/v/missing\"}]}"
+        ]
+      }
+    }
+  ]
+}

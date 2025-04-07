@@ -198,20 +198,38 @@ class ConnectionManager:
             "data": update
         }
         
+        # Get list of subscribers to remove if they fail
         disconnected = []
-        for connection in self.task_subscribers[task_id]:
+        
+        # Send update to all subscribers
+        for websocket in self.task_subscribers[task_id]:
             try:
-                await connection.send_json(message)
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_json(message)
+                else:
+                    disconnected.append(websocket)
             except Exception as e:
-                logger.error(f"Error broadcasting task update for {task_id}: {str(e)}")
-                disconnected.append(connection)
+                logger.error(f"Error sending task update: {str(e)}")
+                disconnected.append(websocket)
         
-        # Clean up any connections that failed
-        for connection in disconnected:
-            if task_id in self.task_subscribers and connection in self.task_subscribers[task_id]:
-                self.task_subscribers[task_id].remove(connection)
+        # Clean up disconnected subscribers
+        for websocket in disconnected:
+            if websocket in self.task_subscribers[task_id]:
+                self.task_subscribers[task_id].remove(websocket)
+            
+            # Remove from active connections
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
+            
+            # Remove from client connections
+            for client_id, connections in list(self.client_connections.items()):
+                if websocket in connections:
+                    connections.remove(websocket)
+                    if not connections:
+                        del self.client_connections[client_id]
         
-        if task_id in self.task_subscribers and not self.task_subscribers[task_id]:
+        # Remove task if no subscribers left
+        if not self.task_subscribers[task_id]:
             del self.task_subscribers[task_id]
 
 # Singleton instance

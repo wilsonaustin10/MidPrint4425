@@ -1,6 +1,7 @@
 playwright==1.40.0
-langchain==0.0.330
-langchain-core==0.1.5
+langchain>=0.1.0
+langchain-core>=0.1.26,<0.2
+langchain-community>=0.0.24
 fastapi==0.104.1
 uvicorn==0.24.0
 python-dotenv==1.0.0
@@ -9,4 +10,6 @@ numpy==1.24.3
 beautifulsoup4==4.12.2
 aiohttp==3.8.6
 pydantic==2.4.2
-pytest==7.4.3 
+pydantic-settings==2.2.1
+pytest==7.4.3
+pytest-asyncio==0.23.5 

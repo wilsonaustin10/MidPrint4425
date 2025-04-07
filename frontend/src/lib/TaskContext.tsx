@@ -1,243 +1,280 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { taskAPI } from './api';
-import websocketService from './websocket';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import { taskAPI, agentAPI } from './api';
+import websocketService, { WebSocketMessage } from './websocket';
 
-// Define task status types
-export enum TaskStatus {
-  PENDING = 'PENDING',
-  RUNNING = 'RUNNING',
-  COMPLETED = 'COMPLETED',
-  FAILED = 'FAILED',
-  CANCELED = 'CANCELED'
-}
+// Task status types
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
 // Task interface
 export interface Task {
   id: string;
-  title: string;
-  description: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'failed';
-  created_at?: string;
-  updated_at?: string;
+  status: TaskStatus;
+  prompt: string;
+  result?: string;
   error?: string;
-  progress?: number;
-  result?: any;
+  created_at: string;
+  updated_at: string;
+  screenshot_data?: string;
+  page_state?: any;
 }
 
-// Context interface
+// TaskContextValue interface
 interface TaskContextValue {
-  tasks: Record<string, Task>;
-  createTask: (title: string, description: string, options?: any) => Promise<Task>;
-  cancelTask: (taskId: string) => Promise<void>;
-  getTask: (taskId: string) => Task | null;
+  tasks: Task[];
+  currentTask: Task | null;
   isLoading: boolean;
-  error: string | null;
-  subscribeToTask: (taskId: string) => void;
+  isConnected: boolean;
+  createTask: (title: string, prompt: string) => Promise<Task>;
+  selectTask: (taskId: string) => void;
+  clearCurrentTask: () => void;
+  getTaskById: (taskId: string) => Task | undefined;
+  refreshTasks: () => Promise<void>;
+  updateLocalTask: (taskId: string, updates: Partial<Task>) => void;
 }
 
-// Default context value
-const defaultValue: TaskContextValue = {
-  tasks: {},
-  createTask: async () => ({ id: '', title: '', description: '', status: 'pending' }),
-  cancelTask: async () => {},
-  getTask: () => null,
-  isLoading: false,
-  error: null,
-  subscribeToTask: () => {},
-};
+// Create the context
+const TaskContext = createContext<TaskContextValue | undefined>(undefined);
 
-// Create context
-const TaskContext = createContext<TaskContextValue>(defaultValue);
+// Provider component
+export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [currentTask, setCurrentTask] = useState<Task | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const websocketSubscriptions = useRef<(() => void)[]>([]);
+  const websocketConnectionCheck = useRef<NodeJS.Timeout | null>(null);
 
-// Use Tasks hook
-export const useTasks = () => useContext(TaskContext);
-
-// TaskProvider props
-interface TaskProviderProps {
-  children: React.ReactNode;
-}
-
-// TaskProvider Component
-export const TaskProvider: React.FC<TaskProviderProps> = ({ children }) => {
-  const [tasks, setTasks] = useState<Record<string, Task>>({});
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [subscriptions, setSubscriptions] = useState<Record<string, () => void>>({});
-
-  // Handle task updates
-  const handleTaskUpdate = useCallback((taskId: string, data: any) => {
-    setTasks(prevTasks => ({
-      ...prevTasks,
-      [taskId]: {
-        ...prevTasks[taskId],
-        ...data,
-      },
-    }));
-  }, []);
-
-  // Subscribe to task updates
-  const subscribeToTask = useCallback((taskId: string) => {
-    // Skip if we already have a subscription for this task
-    if (subscriptions[taskId]) return;
-
+  // Function to refresh tasks from the API
+  const refreshTasks = useCallback(async () => {
     try {
-      // Subscribe to WebSocket updates
-      const unsubscribe = websocketService.subscribeToTask(taskId, (data) => {
-        handleTaskUpdate(taskId, data);
-      });
-
-      // Store the unsubscribe function
-      setSubscriptions(prev => ({
-        ...prev,
-        [taskId]: unsubscribe,
-      }));
-    } catch (err) {
-      console.warn('Failed to subscribe to task updates:', err);
-      // Continue execution even if subscription fails
-    }
-  }, [subscriptions, handleTaskUpdate]);
-
-  // Unsubscribe from task updates
-  const unsubscribeFromTask = useCallback((taskId: string) => {
-    if (subscriptions[taskId]) {
-      try {
-        // Call the unsubscribe function
-        subscriptions[taskId]();
-        
-        // Remove from subscriptions
-        setSubscriptions(prev => {
-          const newSubscriptions = { ...prev };
-          delete newSubscriptions[taskId];
-          return newSubscriptions;
-        });
-      } catch (err) {
-        console.warn('Error unsubscribing from task:', err);
-      }
-    }
-  }, [subscriptions]);
-
-  // Connect/disconnect WebSocket
-  useEffect(() => {
-    try {
-      // Attempt to connect to WebSocket
-      websocketService.connect();
-    } catch (err) {
-      console.warn('WebSocket connection error:', err);
-      // Don't set error state - application should continue without WebSocket
-    }
-
-    // Cleanup on unmount
-    return () => {
-      // Unsubscribe from all tasks
-      Object.keys(subscriptions).forEach(taskId => {
-        try {
-          subscriptions[taskId]();
-        } catch (err) {
-          console.warn(`Error unsubscribing from task ${taskId}:`, err);
+      setIsLoading(true);
+      const fetchedTasks = await taskAPI.getTasks();
+      setTasks(fetchedTasks);
+      
+      // If we have a current task, update it with the latest data
+      if (currentTask) {
+        const updatedCurrentTask = fetchedTasks.find((t: Task) => t.id === currentTask.id);
+        if (updatedCurrentTask) {
+          setCurrentTask(updatedCurrentTask);
         }
-      });
-
-      try {
-        // Disconnect WebSocket
-        websocketService.disconnect();
-      } catch (err) {
-        console.warn('Error disconnecting WebSocket:', err);
       }
-    };
-  }, [subscriptions]);
-
-  // Create task function
-  const createTask = useCallback(async (title: string, description: string, options?: any): Promise<Task> => {
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      // Implementation for task creation
-      // This would typically call an API endpoint
-      const taskId = `task-${Date.now()}`;
-      
-      const newTask: Task = {
-        id: taskId,
-        title,
-        description,
-        status: 'pending',
-        created_at: new Date().toISOString(),
-        ...options,
-      };
-      
-      // Store the task locally
-      setTasks(prevTasks => ({
-        ...prevTasks,
-        [taskId]: newTask,
-      }));
-      
-      // Subscribe to updates for this task
-      subscribeToTask(taskId);
-      
+    } catch (error) {
+      console.error('Error refreshing tasks:', error);
+    } finally {
       setIsLoading(false);
-      return newTask;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to create task';
-      setError(errorMessage);
-      setIsLoading(false);
-      throw err;
     }
-  }, [subscribeToTask]);
+  }, [currentTask]);
 
-  // Cancel task function
-  const cancelTask = useCallback(async (taskId: string): Promise<void> => {
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      // Update task status locally (optimistic update)
-      setTasks(prevTasks => ({
-        ...prevTasks,
-        [taskId]: {
-          ...prevTasks[taskId],
-          status: 'failed',
-          error: 'Task cancelled by user',
-        },
-      }));
-      
-      // Unsubscribe from the task
-      unsubscribeFromTask(taskId);
-      
-      setIsLoading(false);
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to cancel task';
-      setError(errorMessage);
-      setIsLoading(false);
-      throw err;
-    }
-  }, [unsubscribeFromTask]);
-
-  // Get task function
-  const getTask = useCallback((taskId: string): Task | null => {
-    return tasks[taskId] || null;
+  // Function to get a task by ID
+  const getTaskById = useCallback((taskId: string) => {
+    return tasks.find(task => task.id === taskId);
   }, [tasks]);
 
-  // Context value
-  const value: TaskContextValue = {
+  // Function to select a task as the current one
+  const selectTask = useCallback((taskId: string) => {
+    const task = tasks.find(task => task.id === taskId);
+    if (task) {
+      setCurrentTask(task);
+    } else {
+      console.warn(`Task with ID ${taskId} not found`);
+    }
+  }, [tasks]);
+
+  // Function to clear the current task
+  const clearCurrentTask = useCallback(() => {
+    setCurrentTask(null);
+  }, []);
+
+  // Function to update a task locally without API call
+  const updateLocalTask = useCallback((taskId: string, updates: Partial<Task>) => {
+    setTasks(prevTasks => {
+      const updatedTasks = prevTasks.map(task => {
+        if (task.id === taskId) {
+          return { ...task, ...updates };
+        }
+        return task;
+      });
+      return updatedTasks;
+    });
+
+    // Also update current task if it's the one being updated
+    if (currentTask && currentTask.id === taskId) {
+      setCurrentTask(prevTask => {
+        if (prevTask) {
+          return { ...prevTask, ...updates };
+        }
+        return prevTask;
+      });
+    }
+  }, [currentTask]);
+
+  // Function to create a new task
+  const createTask = useCallback(async (title: string, prompt: string) => {
+    const taskId = uuidv4(); // Generate a client-side ID
+    const timestamp = new Date().toISOString();
+    
+    // Create a temporary task object to show in the UI immediately
+    const newTask: Task = {
+      id: taskId,
+      status: 'pending',
+      prompt,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+    
+    setTasks(prevTasks => [newTask, ...prevTasks]);
+    setCurrentTask(newTask);
+    
+    try {
+      // Use the agent API to execute the task
+      const response = await agentAPI.executeTask(prompt);
+      
+      // Get the real task ID from the response
+      const realTaskId = response.task_id;
+      
+      if (!realTaskId) {
+        throw new Error('No task ID returned from the API');
+      }
+      
+      // Get the task details
+      const createdTask = await taskAPI.getTask(realTaskId);
+      
+      // Update local state with the server response
+      setTasks(prevTasks => {
+        // Remove the temporary task
+        const filteredTasks = prevTasks.filter(t => t.id !== taskId);
+        // Add the real task
+        return [createdTask, ...filteredTasks];
+      });
+      
+      // Update current task if it's the one we just created
+      if (currentTask && currentTask.id === taskId) {
+        setCurrentTask(createdTask);
+      }
+      
+      return createdTask;
+    } catch (error) {
+      console.error('Error creating task:', error);
+      
+      // Update the task status to failed
+      updateLocalTask(taskId, { 
+        status: 'failed', 
+        error: error instanceof Error ? error.message : 'Unknown error creating task'
+      });
+      
+      throw error;
+    }
+  }, [currentTask, updateLocalTask]);
+
+  // Handle WebSocket connection status
+  useEffect(() => {
+    // Check connection status periodically
+    websocketConnectionCheck.current = setInterval(() => {
+      setIsConnected(websocketService.isConnected());
+    }, 2000);
+
+    // Initialize the connection
+    websocketService.connect();
+
+    // Add global message handler
+    const unsubscribe = websocketService.addMessageHandler((message: WebSocketMessage) => {
+      if (message.type === 'connection_established') {
+        setIsConnected(true);
+      }
+    });
+
+    // Cleanup function
+    return () => {
+      if (websocketConnectionCheck.current) {
+        clearInterval(websocketConnectionCheck.current);
+      }
+      unsubscribe();
+    };
+  }, []);
+
+  // Load tasks on component mount
+  useEffect(() => {
+    refreshTasks();
+  }, [refreshTasks]);
+
+  // Add WebSocket subscription for a task when it becomes the current task
+  useEffect(() => {
+    // Clean up previous subscriptions
+    websocketSubscriptions.current.forEach(unsubscribe => unsubscribe());
+    websocketSubscriptions.current = [];
+
+    // If we have a current task, subscribe to updates
+    if (currentTask) {
+      console.log(`Subscribing to updates for task ${currentTask.id}`);
+      
+      const unsubscribe = websocketService.subscribeToTask(
+        currentTask.id,
+        (data) => {
+          console.log(`Received update for task ${currentTask.id}:`, data);
+          
+          // Handle different types of updates
+          if (data.status) {
+            updateLocalTask(currentTask.id, { status: data.status });
+          }
+          
+          if (data.result) {
+            updateLocalTask(currentTask.id, { result: data.result });
+          }
+          
+          if (data.screenshot) {
+            updateLocalTask(currentTask.id, { screenshot_data: data.screenshot });
+          }
+          
+          if (data.page_state) {
+            updateLocalTask(currentTask.id, { page_state: data.page_state });
+          }
+          
+          if (data.error) {
+            updateLocalTask(currentTask.id, { 
+              error: data.error,
+              status: 'failed'
+            });
+          }
+        }
+      );
+      
+      websocketSubscriptions.current.push(unsubscribe);
+    }
+    
+    // Cleanup function
+    return () => {
+      websocketSubscriptions.current.forEach(unsubscribe => unsubscribe());
+      websocketSubscriptions.current = [];
+    };
+  }, [currentTask, updateLocalTask]);
+
+  const value = {
     tasks,
-    createTask,
-    cancelTask,
-    getTask,
+    currentTask,
     isLoading,
-    error,
-    subscribeToTask,
+    isConnected,
+    createTask,
+    selectTask,
+    clearCurrentTask,
+    getTaskById,
+    refreshTasks,
+    updateLocalTask,
   };
 
-  return (
-    <TaskContext.Provider value={value}>
-      {children}
-    </TaskContext.Provider>
-  );
+  return <TaskContext.Provider value={value}>{children}</TaskContext.Provider>;
 };
 
-export default TaskContext;
+// Custom hook to use the task context
+export const useTaskContext = (): TaskContextValue => {
+  const context = useContext(TaskContext);
+  if (context === undefined) {
+    throw new Error('useTaskContext must be used within a TaskProvider');
+  }
+  return context;
+};
 
 // No need to re-export what's already exported
 // export type { Task };

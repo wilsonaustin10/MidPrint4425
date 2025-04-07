@@ -15,6 +15,7 @@ import json
 import asyncio
 import time
 import os
+from app.task.service import task_manager
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -48,26 +49,132 @@ class AgentService:
     async def initialize(self) -> Dict[str, Any]:
         """
         Initialize the agent, browser, and controller.
+        Includes retry logic and proper error handling.
         
         Returns:
             Dictionary with initialization status
         """
+        max_retries = 3
+        retry_count = 0
+        last_error = None
+        
+        while retry_count < max_retries:
+            try:
+                # Clean up any existing state
+                await self._cleanup()
+                
+                # Initialize browser with retries
+                await self.browser.initialize()
+                
+                # Initialize LLM components
+                self.llm_service = LLMService()
+                self.message_manager = MessageManager()
+                self.response_parser = LLMResponseParser()
+                
+                # Set initial state
+                self.current_state = {
+                    "initialized": True,
+                    "current_url": None,
+                    "last_screenshot": None,
+                    "last_error": None,
+                    "history": [],
+                    "task_id": f"task_{int(time.time())}",
+                    "multi_step_tasks": {
+                        "active": False,
+                        "current_plan": None
+                    }
+                }
+                
+                logger.info(f"Agent initialized with task ID: {self.current_state['task_id']}")
+                return {"status": "success", "message": "Agent initialized successfully"}
+                
+            except Exception as e:
+                last_error = str(e)
+                retry_count += 1
+                
+                logger.error(f"Initialization attempt {retry_count} failed: {last_error}")
+                
+                # Clean up resources before retry
+                await self._cleanup()
+                
+                if retry_count < max_retries:
+                    await asyncio.sleep(1)  # Wait before retrying
+                
+        error_msg = f"Failed to initialize agent after {max_retries} attempts. Last error: {last_error}"
+        logger.error(error_msg)
+        
+        self.current_state = {
+            "initialized": False,
+            "current_url": None,
+            "last_screenshot": None,
+            "last_error": error_msg,
+            "history": [],
+            "task_id": None,
+            "multi_step_tasks": {
+                "active": False,
+                "current_plan": None
+            }
+        }
+        
+        return {"status": "error", "message": error_msg}
+    
+    async def _cleanup(self) -> None:
+        """
+        Clean up agent resources and state.
+        """
         try:
-            await self.browser.initialize()
-            self.current_state["initialized"] = True
-            self.current_state["task_id"] = f"task_{int(time.time())}"
+            # Reset state
+            self.current_state = {
+                "initialized": False,
+                "current_url": None,
+                "last_screenshot": None,
+                "last_error": None,
+                "history": [],
+                "task_id": None,
+                "multi_step_tasks": {
+                    "active": False,
+                    "current_plan": None
+                }
+            }
             
-            # Initialize LLM components
-            self.llm_service = LLMService()
-            self.message_manager = MessageManager()
-            self.response_parser = LLMResponseParser()
+            # Clean up LLM components
+            self.llm_service = None
+            self.message_manager = None
+            self.response_parser = None
             
-            logger.info(f"Agent initialized with task ID: {self.current_state['task_id']}")
-            return {"status": "success", "message": "Agent initialized successfully"}
+            # Clean up browser if needed
+            if self.browser and self.browser.is_initialized:
+                await self.browser._cleanup()
+                
         except Exception as e:
-            self.current_state["last_error"] = str(e)
-            logger.error(f"Failed to initialize agent: {str(e)}")
-            return {"status": "error", "message": f"Failed to initialize agent: {str(e)}"}
+            logger.error(f"Error during cleanup: {str(e)}")
+    
+    def is_initialized(self) -> bool:
+        """
+        Check if the agent is properly initialized.
+        
+        Returns:
+            True if initialized, False otherwise
+        """
+        return (
+            self.current_state["initialized"] and
+            self.browser and
+            self.browser.is_initialized and
+            self.llm_service is not None and
+            self.message_manager is not None and
+            self.response_parser is not None
+        )
+    
+    async def ensure_initialized(self) -> Dict[str, Any]:
+        """
+        Ensure the agent is initialized, initializing it if necessary.
+        
+        Returns:
+            Dictionary with initialization status
+        """
+        if not self.is_initialized():
+            return await self.initialize()
+        return {"status": "success", "message": "Agent already initialized"}
     
     async def navigate_to_url(self, url: str) -> Dict[str, Any]:
         """
@@ -241,14 +348,14 @@ class AgentService:
         Get the current DOM of the page.
         
         Returns:
-            Dictionary with DOM content
+            Dictionary with DOM content and status
         """
         try:
             # Execute the action via the controller
-            action_result = await self.controller.execute_action("get_dom", {})
+            action_result = await self.execute_action("get_dom", {})
             
             if action_result["status"] != "success":
-                self.current_state["last_error"] = action_result.get("message", "Get DOM failed")
+                self.current_state["last_error"] = action_result.get("message", "Failed to get DOM")
                 return action_result
             
             # Update agent state
@@ -258,55 +365,54 @@ class AgentService:
                 "timestamp": time.time()
             })
             
-            logger.info("Retrieved DOM content")
+            logger.info(f"Retrieved DOM content successfully")
             return {
                 "status": "success",
-                "content": result["content"],
-                "page_state": result["page_state"]
+                "content_length": len(result["content"]) if "content" in result else 0,
+                "content": result.get("content", ""),
+                "page_state": result.get("page_state", {})
             }
         except Exception as e:
-            error_msg = f"Error getting DOM: {str(e)}"
+            error_msg = f"DOM retrieval error: {str(e)}"
             self.current_state["last_error"] = error_msg
             logger.error(error_msg)
             return {"status": "error", "message": error_msg}
     
     async def capture_screenshot(self, full_page: bool = True) -> Dict[str, Any]:
         """
-        Take a screenshot of the current page.
+        Capture a screenshot of the current page.
         
         Args:
             full_page: Whether to capture the full page or just the viewport
             
         Returns:
-            Dictionary with screenshot data
+            Dictionary with screenshot data and status
         """
         try:
             # Execute the action via the controller
-            action_result = await self.controller.execute_action("capture_screenshot", {
-                "full_page": full_page
-            })
+            action_result = await self.execute_action("capture_screenshot", {"full_page": full_page})
             
             if action_result["status"] != "success":
-                self.current_state["last_error"] = action_result.get("message", "Screenshot failed")
+                self.current_state["last_error"] = action_result.get("message", "Screenshot capture failed")
                 return action_result
             
             # Update agent state
             result = action_result["result"]
-            self.current_state["last_screenshot"] = result["screenshot"]
+            self.current_state["last_screenshot"] = result.get("screenshot")
             self.current_state["history"].append({
                 "action": "capture_screenshot",
                 "full_page": full_page,
                 "timestamp": time.time()
             })
             
-            logger.info(f"Captured screenshot (full_page={full_page})")
+            logger.info(f"Captured screenshot successfully (full_page={full_page})")
             return {
                 "status": "success",
-                "screenshot": result["screenshot"],
-                "full_page": full_page
+                "screenshot": result.get("screenshot"),
+                "page_state": result.get("page_state", {})
             }
         except Exception as e:
-            error_msg = f"Screenshot error: {str(e)}"
+            error_msg = f"Screenshot capture error: {str(e)}"
             self.current_state["last_error"] = error_msg
             logger.error(error_msg)
             return {"status": "error", "message": error_msg}
@@ -319,16 +425,31 @@ class AgentService:
             time_ms: Time to wait in milliseconds
             
         Returns:
-            Dictionary with wait results
+            Dictionary with wait status
         """
         try:
+            # Validate time parameter
+            if not isinstance(time_ms, int):
+                try:
+                    time_ms = int(time_ms)
+                except (ValueError, TypeError):
+                    error_msg = f"Invalid time value: {time_ms}, must be an integer"
+                    self.current_state["last_error"] = error_msg
+                    return {"status": "error", "message": error_msg}
+            
+            # Ensure time is reasonable (between 100ms and 30s)
+            if time_ms < 100:
+                time_ms = 100
+                logger.info(f"Adjusted wait time to minimum 100ms")
+            elif time_ms > 30000:
+                time_ms = 30000
+                logger.info(f"Adjusted wait time to maximum 30000ms (30s)")
+            
             # Execute the action via the controller
-            action_result = await self.controller.execute_action("wait", {
-                "time": time_ms
-            })
+            action_result = await self.execute_action("wait", {"time": time_ms})
             
             if action_result["status"] != "success":
-                self.current_state["last_error"] = action_result.get("message", "Wait failed")
+                self.current_state["last_error"] = action_result.get("message", "Wait operation failed")
                 return action_result
             
             # Update agent state
@@ -338,10 +459,10 @@ class AgentService:
                 "timestamp": time.time()
             })
             
-            logger.info(f"Waited for {time_ms}ms")
+            logger.info(f"Waited for {time_ms}ms successfully")
             return {
                 "status": "success",
-                "waited_ms": time_ms
+                "time_ms": time_ms
             }
         except Exception as e:
             error_msg = f"Wait error: {str(e)}"
@@ -556,80 +677,121 @@ class AgentService:
             logger.error(error_msg)
             return {"status": "error", "message": error_msg}
     
-    async def execute_from_natural_language(self, task_description: str) -> Dict[str, Any]:
+    async def execute_from_natural_language(self, task_description: str, task_id: str = None) -> Dict[str, Any]:
         """
-        Execute a natural language task by interpreting it and executing the resulting actions.
+        Execute a task described in natural language.
         
         Args:
             task_description: Natural language description of the task
+            task_id: Optional task ID for tracking
             
         Returns:
-            Dictionary with the execution result
+            Dictionary with execution results
         """
         try:
-            if not self.current_state["initialized"]:
-                return {
-                    "status": "error",
-                    "message": "Agent not initialized"
-                }
+            # Ensure agent is initialized
+            init_result = await self.ensure_initialized()
+            if init_result["status"] != "success":
+                error_msg = f"Failed to initialize agent: {init_result['message']}"
+                logger.error(error_msg)
+                task_manager.fail(task_id, error_msg)
+                return {"status": "error", "message": error_msg}
             
-            # Get current page state to provide context
-            page_state = await self.browser.get_page_state()
+            # Start task tracking
+            if task_id:
+                task_manager.start(task_id)
+                task_manager.add_log(task_id, f"Starting task: {task_description}")
             
-            # Interpret the task
-            interpretation_result = await self.interpret_task(task_description, page_state)
+            # Get current page state for context
+            try:
+                page_state = await self.browser.get_page_state()
+            except Exception as e:
+                page_state = {"error": str(e)}
             
-            if interpretation_result["status"] == "error":
-                return interpretation_result
+            # Update conversation history with task
+            self.message_manager.add_user_message(task_description)
             
-            action_plan = interpretation_result["action_plan"]
-            action = action_plan["action"]
-            parameters = action_plan["parameters"]
-            
-            # Handle the various action types
-            if action == "plan_task":
-                # Handle task planning
-                return await self._handle_plan_task(task_description, parameters)
-            elif action == "execute_step":
-                # Handle step execution
-                return await self._handle_execute_step(parameters)
-            elif action == "done":
-                # Task is done
+            # Get LLM response
+            try:
+                llm_response = await self.llm_service.get_response(
+                    self.message_manager.get_messages(),
+                    page_state
+                )
+                
+                # Parse and validate response
+                try:
+                    action_plan = self.response_parser.parse_response(llm_response)
+                except ActionValidationError as e:
+                    error_msg = f"Invalid action plan: {str(e)}"
+                    logger.error(error_msg)
+                    if task_id:
+                        task_manager.fail(task_id, error_msg)
+                    return {"status": "error", "message": error_msg}
+                
+                # Execute each action in the plan
+                results = []
+                for action in action_plan:
+                    try:
+                        # Update task progress
+                        if task_id:
+                            progress = (len(results) + 1) / len(action_plan) * 100
+                            task_manager.update_progress(task_id, progress, f"Executing action: {action['action']}")
+                        
+                        # Execute the action
+                        action_result = await self.controller.execute_action(
+                            action["action"],
+                            action.get("params", {})
+                        )
+                        
+                        # Handle action result
+                        if action_result["status"] != "success":
+                            error_msg = f"Action failed: {action_result.get('message', 'Unknown error')}"
+                            logger.error(error_msg)
+                            if task_id:
+                                task_manager.fail(task_id, error_msg)
+                            return {"status": "error", "message": error_msg}
+                        
+                        # Add result to history
+                        results.append({
+                            "action": action["action"],
+                            "params": action.get("params", {}),
+                            "result": action_result["result"]
+                        })
+                        
+                        # Update conversation history
+                        self.message_manager.add_assistant_message(
+                            f"Executed {action['action']} successfully"
+                        )
+                        
+                    except Exception as e:
+                        error_msg = f"Error executing action {action['action']}: {str(e)}"
+                        logger.error(error_msg)
+                        if task_id:
+                            task_manager.fail(task_id, error_msg)
+                        return {"status": "error", "message": error_msg}
+                
+                # Complete task successfully
+                if task_id:
+                    task_manager.complete(task_id, {"results": results})
+                
                 return {
                     "status": "success",
-                    "message": "Task completed successfully",
-                    "thought": action_plan.get("thought", ""),
-                    "action": action,
-                    "parameters": parameters
+                    "results": results,
+                    "conversation": self.message_manager.get_messages()
                 }
-            else:
-                # Other actions (direct browser actions)
-                result = await self.execute_action(action, parameters)
                 
-                # Update conversation history with the result
-                result_summary = f"Action '{action}' was executed with result: {result['status']}"
-                self.message_manager.add_system_message(result_summary)
-                
-                # Update agent state
-                self.current_state["history"].append({
-                    "task": task_description,
-                    "action": action,
-                    "timestamp": time.time(),
-                    "result": result["status"]
-                })
-                
-                return {
-                    "status": result["status"],
-                    "thought": action_plan.get("thought", ""),
-                    "action": action,
-                    "parameters": parameters,
-                    "result": result,
-                    "raw_response": interpretation_result.get("raw_response")
-                }
+            except Exception as e:
+                error_msg = f"LLM error: {str(e)}"
+                logger.error(error_msg)
+                if task_id:
+                    task_manager.fail(task_id, error_msg)
+                return {"status": "error", "message": error_msg}
+            
         except Exception as e:
-            error_msg = f"Error executing natural language task: {str(e)}"
-            self.current_state["last_error"] = error_msg
+            error_msg = f"Task execution error: {str(e)}"
             logger.error(error_msg)
+            if task_id:
+                task_manager.fail(task_id, error_msg)
             return {"status": "error", "message": error_msg}
     
     async def _handle_plan_task(self, task_description: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -731,6 +893,9 @@ class AgentService:
             current_plan = self.current_state["multi_step_tasks"]["current_plan"]
             current_step = current_plan["steps"][step_index]
             
+            # Log the step execution
+            logger.info(f"Executing step {step_index + 1}: '{current_step}' with action: {action}")
+            
             # Start the step in the message manager
             step_info = self.message_manager.start_step(step_index)
             if "error" in step_info:
@@ -796,14 +961,15 @@ class AgentService:
                     }
             else:
                 # Step failed
-                failure_info = self.message_manager.fail_step(step_index, result.get("message", "Unknown error"))
+                error_message = result.get("message", "Unknown error")
+                failure_info = self.message_manager.fail_step(step_index, error_message)
                 
                 # Update the current state
                 current_plan["status"] = "failed"
                 
                 return {
                     "status": "error",
-                    "message": f"Step {step_index + 1} failed: {result.get('message', 'Unknown error')}",
+                    "message": f"Step {step_index + 1} failed: {error_message}",
                     "action": action,
                     "parameters": action_parameters,
                     "result": result,
@@ -872,93 +1038,90 @@ class AgentService:
     
     async def execute_action(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Execute a specific browser action with the given parameters.
+        Execute a specific action with parameters.
         
         Args:
-            action: The action to execute (go_to_url, click_element_by_index, input_text, done)
+            action: Action name
+            parameters: Action parameters
+            
+        Returns:
+            Dictionary with action results, standardized format with 'status' field
+        """
+        try:
+            # Log action execution with parameters (excluding sensitive data)
+            safe_params = self._get_safe_params_for_logging(action, parameters)
+            logger.info(f"Executing action: {action} with parameters: {safe_params}")
+            
+            # Get the current task_id for WebSocket broadcasts
+            task_id = self.current_state.get("task_id")
+            
+            # Pass the task_id to the controller
+            action_result = await self.controller.execute_action(action, parameters, task_id)
+            
+            # Handle success case
+            if action_result["status"] == "success":
+                logger.info(f"Action {action} executed successfully")
+                return {
+                    "status": "success",
+                    "action": action,
+                    "result": action_result["result"]
+                }
+            # Handle error case
+            else:
+                error_msg = action_result.get("message", "Unknown error")
+                logger.error(f"Action {action} failed: {error_msg}")
+                
+                # Update error state
+                self.current_state["last_error"] = error_msg
+                
+                return {
+                    "status": "error",
+                    "action": action,
+                    "message": error_msg,
+                    "details": action_result.get("errors", {})
+                }
+        except Exception as e:
+            error_msg = f"Error executing action {action}: {str(e)}"
+            logger.exception(error_msg)
+            
+            # Update error state
+            self.current_state["last_error"] = error_msg
+            
+            return {
+                "status": "error",
+                "action": action,
+                "message": error_msg
+            }
+
+    def _get_safe_params_for_logging(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get a safe version of parameters for logging, with sensitive data redacted.
+        
+        Args:
+            action: The action being executed
             parameters: The parameters for the action
             
         Returns:
-            Dictionary with the execution result
+            Dictionary with sensitive data redacted
         """
-        try:
-            if not self.current_state["initialized"]:
-                return {
-                    "status": "error",
-                    "message": "Agent not initialized"
-                }
-            
-            # Get the current page state to help with element selection
-            page_state = await self.browser.get_page_state()
-            
-            # Execute the appropriate action
-            if action == "go_to_url":
-                url = parameters.get("url", "")
-                if not url:
-                    return {"status": "error", "message": "URL parameter is required"}
-                
-                # Navigate to the URL
-                result = await self.browser.navigate_to_url(url)
-                if result["status"] == "success":
-                    self.current_state["current_url"] = url
-                
-                return result
-            
-            elif action == "click_element_by_index":
-                element_index = int(parameters.get("element_index", -1))
-                if element_index < 0:
-                    return {"status": "error", "message": "Invalid element_index parameter"}
-                
-                # Find the element by index in the page state
-                if page_state.get("elements") and element_index < len(page_state["elements"]):
-                    element = page_state["elements"][element_index]
-                    selector = element.get("selector", "")
-                    
-                    if not selector:
-                        return {"status": "error", "message": f"No selector available for element at index {element_index}"}
-                    
-                    # Click the element
-                    result = await self.browser.click_element(selector)
-                    return result
-                else:
-                    return {"status": "error", "message": f"Element index {element_index} is out of range"}
-            
-            elif action == "input_text":
-                element_index = int(parameters.get("element_index", -1))
-                text = parameters.get("text", "")
-                
-                if element_index < 0:
-                    return {"status": "error", "message": "Invalid element_index parameter"}
-                
-                if not text:
-                    return {"status": "error", "message": "Text parameter is required"}
-                
-                # Find the element by index in the page state
-                if page_state.get("elements") and element_index < len(page_state["elements"]):
-                    element = page_state["elements"][element_index]
-                    selector = element.get("selector", "")
-                    
-                    if not selector:
-                        return {"status": "error", "message": f"No selector available for element at index {element_index}"}
-                    
-                    # Input text into the element
-                    result = await self.browser.input_text(selector, text)
-                    return result
-                else:
-                    return {"status": "error", "message": f"Element index {element_index} is out of range"}
-            
-            elif action == "done":
-                # Nothing to do, just return success
-                return {"status": "success", "message": "Task completed successfully"}
-            
-            else:
-                return {"status": "error", "message": f"Unsupported action: {action}"}
+        # Create a copy to avoid modifying the original
+        safe_params = parameters.copy()
         
-        except Exception as e:
-            error_msg = f"Error executing action {action}: {str(e)}"
-            self.current_state["last_error"] = error_msg
-            logger.error(error_msg)
-            return {"status": "error", "message": error_msg}
+        # Redact sensitive data based on action type
+        if action == "input_text" and "text" in safe_params:
+            # Redact text content but show length
+            text_length = len(safe_params["text"])
+            safe_params["text"] = f"[REDACTED - {text_length} chars]"
+        
+        # For nested parameters in execute_step
+        if action == "execute_step" and "parameters" in safe_params:
+            nested_action = safe_params.get("action", "")
+            safe_params["parameters"] = self._get_safe_params_for_logging(
+                nested_action, 
+                safe_params["parameters"]
+            )
+        
+        return safe_params
 
 # Singleton instance
 agent_service = AgentService() 

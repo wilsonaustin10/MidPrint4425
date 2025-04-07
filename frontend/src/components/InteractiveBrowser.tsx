@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, FormEvent } from 'react';
 import Image from 'next/image';
 import TransitionEffect from './TransitionEffect';
 
@@ -10,8 +10,9 @@ interface InteractiveBrowserProps {
   highlightedElements?: HighlightedElement[];
   onRefresh?: () => void;
   onStop?: () => void;
+  onNavigate?: (url: string) => void; // New prop for URL navigation
   error?: string;
-  actionIndicators?: ActionIndicator[]; // New prop for showing action indicators
+  actionIndicators?: ActionIndicator[];
 }
 
 interface HighlightedElement {
@@ -21,8 +22,8 @@ interface HighlightedElement {
   width: number;
   height: number;
   color?: string;
-  label?: string; // New property to show a label for the highlighted element
-  type?: 'target' | 'hover' | 'focus'; // New property to indicate the type of highlight
+  label?: string;
+  type?: 'target' | 'hover' | 'focus';
 }
 
 // New interface for action indicators
@@ -133,6 +134,7 @@ const InteractiveBrowser: React.FC<InteractiveBrowserProps> = ({
   highlightedElements = [],
   onRefresh,
   onStop,
+  onNavigate,
   error,
   actionIndicators = []
 }) => {
@@ -141,6 +143,11 @@ const InteractiveBrowser: React.FC<InteractiveBrowserProps> = ({
   const [visibleIndicators, setVisibleIndicators] = useState<ActionIndicator[]>([]);
   const [previousUrl, setPreviousUrl] = useState('');
   const [showTransition, setShowTransition] = useState(false);
+  const [inputUrl, setInputUrl] = useState(currentUrl);
+  const [urlHistory, setUrlHistory] = useState<string[]>([]);
+  const [isUrlValid, setIsUrlValid] = useState(true);
+  const [showUrlHistory, setShowUrlHistory] = useState(false);
+  const urlInputRef = useRef<HTMLInputElement>(null);
   
   // Handle image loading to get dimensions for overlay positioning
   useEffect(() => {
@@ -159,21 +166,39 @@ const InteractiveBrowser: React.FC<InteractiveBrowserProps> = ({
     }
   }, [screenshot]);
   
-  // URL change detection for transitions
+  // URL change detection for transitions and history tracking
   useEffect(() => {
-    if (currentUrl && currentUrl !== previousUrl) {
-      // URL has changed, show transition effect
-      setShowTransition(true);
+    if (currentUrl) {
+      // Update input field with current URL
+      setInputUrl(currentUrl);
       
-      // After transition period, hide it and update previous URL
-      const timer = setTimeout(() => {
-        setShowTransition(false);
+      if (currentUrl !== previousUrl && previousUrl) {
+        // URL has changed, show transition effect
+        setShowTransition(true);
+        
+        // Add to URL history if it's a new URL
+        if (!urlHistory.includes(currentUrl)) {
+          setUrlHistory(prev => [currentUrl, ...prev.slice(0, 9)]);
+        }
+        
+        // After transition period, hide it and update previous URL
+        const timer = setTimeout(() => {
+          setShowTransition(false);
+          setPreviousUrl(currentUrl);
+        }, 1000);
+        
+        return () => clearTimeout(timer);
+      } else if (currentUrl && !previousUrl) {
+        // Initial URL, just set previousUrl without transition
         setPreviousUrl(currentUrl);
-      }, 1000);
-      
-      return () => clearTimeout(timer);
+        
+        // Add to history if it's not empty
+        if (currentUrl.trim() !== '' && !urlHistory.includes(currentUrl)) {
+          setUrlHistory(prev => [currentUrl, ...prev.slice(0, 9)]);
+        }
+      }
     }
-  }, [currentUrl, previousUrl]);
+  }, [currentUrl, previousUrl, urlHistory]);
   
   // Handle action indicators - add new ones and remove old ones after a timeout
   useEffect(() => {
@@ -196,11 +221,97 @@ const InteractiveBrowser: React.FC<InteractiveBrowserProps> = ({
     }
   }, [actionIndicators]);
 
+  // Validate URL format
+  const validateUrl = (url: string): boolean => {
+    if (!url || url.trim() === '') return false;
+    
+    // Simple URL validation
+    try {
+      // Add protocol if missing to avoid URL constructor errors
+      const urlToValidate = url.startsWith('http://') || url.startsWith('https://') 
+        ? url 
+        : `https://${url}`;
+      
+      new URL(urlToValidate);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Handle URL navigation from address bar
+  const handleNavigate = (e: FormEvent) => {
+    e.preventDefault();
+    
+    // Validate URL
+    const isValid = validateUrl(inputUrl);
+    setIsUrlValid(isValid);
+    
+    if (!isValid) return;
+    
+    // Format URL if needed
+    let formattedUrl = inputUrl;
+    if (!inputUrl.startsWith('http://') && !inputUrl.startsWith('https://')) {
+      formattedUrl = `https://${inputUrl}`;
+      setInputUrl(formattedUrl);
+    }
+    
+    // Call the navigation callback
+    if (onNavigate) {
+      onNavigate(formattedUrl);
+    }
+    
+    // Hide URL history dropdown after navigation
+    setShowUrlHistory(false);
+  };
+
+  // Navigate to a history item
+  const navigateToHistoryItem = (url: string) => {
+    setInputUrl(url);
+    
+    if (onNavigate) {
+      onNavigate(url);
+    }
+    
+    setShowUrlHistory(false);
+  };
+
+  // Focus on URL input when clicking the address bar
+  const handleAddressBarClick = () => {
+    if (urlInputRef.current) {
+      urlInputRef.current.focus();
+      urlInputRef.current.select();
+    }
+  };
+
   return (
     <div className="flex flex-col bg-white shadow rounded-lg overflow-hidden">
       {/* URL Bar and Controls */}
       <div className="border-b p-2 flex items-center bg-gray-100">
         <div className="flex items-center space-x-2 mr-2">
+          {/* Back button - Would need actual browser history integration */}
+          <button 
+            className="p-1 rounded hover:bg-gray-200 disabled:opacity-50 transition-colors"
+            disabled={true}
+            title="Back"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          
+          {/* Forward button - Would need actual browser history integration */}
+          <button 
+            className="p-1 rounded hover:bg-gray-200 disabled:opacity-50 transition-colors"
+            disabled={true}
+            title="Forward"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+          
+          {/* Refresh button */}
           {onRefresh && (
             <button 
               onClick={onRefresh}
@@ -213,6 +324,8 @@ const InteractiveBrowser: React.FC<InteractiveBrowserProps> = ({
               </svg>
             </button>
           )}
+          
+          {/* Stop button */}
           {onStop && (
             <button 
               onClick={onStop}
@@ -227,35 +340,98 @@ const InteractiveBrowser: React.FC<InteractiveBrowserProps> = ({
           )}
         </div>
         
-        <div className="flex-grow px-3 py-1 bg-white border rounded flex items-center">
-          {currentUrl ? (
-            <div className="flex items-center w-full">
-              {isLoading && (
-                <div className="mr-2">
-                  <svg className="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        {/* Enhanced Address Bar with validation */}
+        <div className="flex-grow relative">
+          <form onSubmit={handleNavigate}>
+            <div 
+              className={`px-3 py-1 bg-white border rounded flex items-center ${!isUrlValid ? 'border-red-500' : ''}`}
+              onClick={handleAddressBarClick}
+            >
+              {/* SSL indicator */}
+              <div className="mr-2 text-gray-500">
+                {currentUrl && (currentUrl.startsWith('https://')) ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-600" viewBox="0 0 20 20" fill="currentColor">
+                    <title>Secure connection</title>
+                    <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                   </svg>
-                </div>
-              )}
-              <TransitionEffect
-                isVisible={showTransition}
-                type="fade"
-                duration={500}
-              >
-                <span className="truncate text-sm text-blue-600 font-medium">
-                  {currentUrl}
-                </span>
-              </TransitionEffect>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                    <title>Information</title>
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </div>
               
-              {!showTransition && (
-                <span className="truncate text-sm text-gray-600">
-                  {currentUrl}
-                </span>
+              {/* URL Input */}
+              <div className="flex-grow relative">
+                {isLoading && (
+                  <div className="absolute left-0 top-0 bottom-0 flex items-center">
+                    <svg className="animate-spin h-4 w-4 text-blue-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
+                )}
+                
+                <input
+                  type="text"
+                  ref={urlInputRef}
+                  value={inputUrl}
+                  onChange={(e) => {
+                    setInputUrl(e.target.value);
+                    setIsUrlValid(true); // Reset validation on change
+                  }}
+                  onFocus={() => setShowUrlHistory(true)}
+                  onBlur={() => setTimeout(() => setShowUrlHistory(false), 200)}
+                  className={`w-full text-sm ${isLoading ? 'pl-6' : ''} py-1 focus:outline-none ${!isUrlValid ? 'text-red-600' : 'text-gray-600'}`}
+                  placeholder="Enter a URL"
+                />
+              </div>
+              
+              {/* Go button */}
+              {onNavigate && (
+                <button
+                  type="submit"
+                  className="ml-2 p-1 rounded hover:bg-gray-100 text-blue-600"
+                  title="Go to this address"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L12.586 11H5a1 1 0 110-2h7.586l-2.293-2.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
               )}
             </div>
-          ) : (
-            <span className="text-sm text-gray-400">No URL loaded</span>
+          </form>
+          
+          {/* URL validation error message */}
+          {!isUrlValid && (
+            <div className="absolute left-0 -bottom-5 text-xs text-red-500">
+              Please enter a valid URL
+            </div>
+          )}
+          
+          {/* URL history dropdown */}
+          {showUrlHistory && urlHistory.length > 0 && (
+            <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border rounded-md shadow-lg max-h-60 overflow-y-auto">
+              <div className="p-2 border-b text-xs text-gray-500 font-medium">
+                Recent URLs
+              </div>
+              <ul>
+                {urlHistory.map((url, index) => (
+                  <li key={index}>
+                    <button
+                      className="w-full text-left px-3 py-2 hover:bg-gray-100 text-sm flex items-center space-x-2"
+                      onClick={() => navigateToHistoryItem(url)}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span className="truncate">{url}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       </div>
@@ -353,7 +529,7 @@ const InteractiveBrowser: React.FC<InteractiveBrowserProps> = ({
                 case 'navigation':
                   return <NavigationIndicator key={indicator.id} />;
                 case 'scroll':
-                  return <ScrollIndicator key={indicator.id} x={indicator.x} y={indicator.y} direction={indicator.y > window.innerHeight / 2 ? 'down' : 'up'} />;
+                  return <ScrollIndicator key={indicator.id} x={indicator.x} y={indicator.y} direction={indicator.content === 'up' ? 'up' : 'down'} />;
                 case 'hover':
                   return <HoverIndicator key={indicator.id} x={indicator.x} y={indicator.y} />;
                 default:

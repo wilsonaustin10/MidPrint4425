@@ -1,0 +1,50 @@
+{
+  "timestamp": "2025-04-06T10:19:10.205312",
+  "tests": [
+    {
+      "name": "NAV_01",
+      "description": "Simple URL navigation test",
+      "result": "FAILED",
+      "timestamp": "2025-04-06T10:19:10.544323",
+      "metrics": {
+        "start_time": null,
+        "agent_execution_time": null,
+        "first_screenshot_time": null,
+        "navigation_completion_time": null,
+        "url_sync_time": null,
+        "title_sync_time": null,
+        "test_result": "FAILED",
+        "errors": []
+      }
+    },
+    {
+      "name": "FORM_01",
+      "description": "Form interaction test",
+      "result": "FAILED",
+      "timestamp": "2025-04-06T10:19:10.544335",
+      "metrics": {
+        "start_time": null,
+        "agent_execution_time": null,
+        "first_screenshot_time": null,
+        "typing_indicator_time": null,
+        "form_completion_time": null,
+        "test_result": "FAILED",
+        "typing_indicators_received": 0,
+        "action_feedback_received": 0,
+        "errors": []
+      }
+    },
+    {
+      "name": "FLOW_01",
+      "description": "Multi-step workflow test",
+      "result": "PASSED",
+      "timestamp": "2025-04-06T10:19:10.544337",
+      "metrics": {
+        "start_time": 1743952750.207529,
+        "end_time": 1743952750.221921,
+        "duration": 0.014391899108886719,
+        "errors": []
+      }
+    }
+  ]
+}

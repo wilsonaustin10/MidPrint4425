@@ -1,78 +1,73 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
-import ChatBox, { Message } from '../../components/ChatBox'
-import { useTasks } from '@/lib/TaskContext'
-import { agentAPI } from '@/lib/api'
-import { v4 as uuidv4 } from 'uuid'
+import { useSearchParams } from 'next/navigation'
+import ChatBox, { Message } from '@/components/ChatBox'
+import TaskView from '@/components/TaskView'
+import { useTaskContext } from '@/lib/TaskContext'
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const { tasks, createTask, cancelTask } = useTasks();
+  const [messages, setMessages] = useState<Message[]>([])
+  const [isSplitView, setIsSplitView] = useState<boolean>(true)
+  const searchParams = useSearchParams()
+  const { createTask, currentTask } = useTaskContext()
   
-  // Handle message sent
+  useEffect(() => {
+    // Check for initial task from URL parameters
+    const taskParam = searchParams.get('task')
+    if (taskParam) {
+      // Add the task as the first user message
+      setMessages([
+        {
+          role: 'user',
+          content: taskParam
+        }
+      ])
+    }
+  }, [searchParams])
+
   const handleMessageSent = async (message: Message) => {
-    // Add message to the chat
     setMessages(prev => [...prev, message]);
     
-    // Create a "thinking" message from the assistant
-    const thinkingMessage: Message = {
-      role: 'assistant',
-      content: 'Thinking...',
-      status: 'loading'
-    };
-    
-    setMessages(prev => [...prev, thinkingMessage]);
-    
-    try {
-      // Generate a task ID and create it
-      const task = await createTask(`Process query: ${message.content}`, message.content);
-      
-      // Replace the thinking message with the actual response
-      setMessages(prev => {
-        const newMessages = [...prev];
-        const thinkingIndex = newMessages.findIndex(
-          m => m.role === 'assistant' && m.status === 'loading'
-        );
+    if (message.role === 'user') {
+      try {
+        // Add a temporary thinking message
+        const thinkingMessage: Message = {
+          role: 'assistant',
+          content: 'Thinking...',
+          status: 'loading'
+        };
         
-        if (thinkingIndex !== -1) {
-          newMessages.splice(thinkingIndex, 1);
-        }
+        setMessages(prev => [...prev, thinkingMessage]);
         
-        return newMessages;
-      });
-      
-      // Add a completed response message
-      const responseMessage: Message = {
-        role: 'assistant',
-        content: 'Your request is being processed.',
-        status: 'success',
-        isMarkdown: true
-      };
-      
-      setMessages(prev => [...prev, responseMessage]);
-    } catch (error) {
-      console.error('Error processing message:', error);
-      
-      // Replace the thinking message with an error message
-      setMessages(prev => {
-        const newMessages = [...prev];
-        const thinkingIndex = newMessages.findIndex(
-          m => m.role === 'assistant' && m.status === 'loading'
-        );
+        // Create a task for the user's message
+        await createTask('Browser Task', message.content);
         
-        if (thinkingIndex !== -1) {
-          newMessages[thinkingIndex] = {
+        // The actual response will come via WebSockets through the TaskContext
+        // which will be displayed in the TaskView component
+      } catch (error) {
+        console.error('Error creating task:', error);
+        
+        // Add error message
+        setMessages(prev => {
+          // Remove the thinking message
+          const withoutThinking = prev.slice(0, -1);
+          
+          // Add the error message
+          return [...withoutThinking, {
             role: 'assistant',
             content: 'Sorry, there was an error processing your request. Please try again.',
             status: 'error'
-          };
-        }
-        
-        return newMessages;
-      });
+          }];
+        });
+      }
     }
+  };
+
+  // Toggle between split view and chat-only view
+  const toggleView = () => {
+    setIsSplitView(!isSplitView);
   };
 
   return (
@@ -82,20 +77,60 @@ export default function ChatPage() {
           <h1 className="text-3xl font-bold text-gray-900">
             <Link href="/">MidPrint</Link> - Chat
           </h1>
-          <Link href="/browser" className="text-blue-600 hover:text-blue-800">
-            View Browser
-          </Link>
+          <div className="flex space-x-4">
+            <button
+              onClick={toggleView}
+              className="text-gray-600 hover:text-gray-800 focus:outline-none"
+              aria-label={isSplitView ? "Hide task view" : "Show task view"}
+            >
+              {isSplitView ? (
+                <span className="flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
+                  </svg>
+                  Chat Only
+                </span>
+              ) : (
+                <span className="flex items-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V5zm11 1H6v8h8V6z" clipRule="evenodd" />
+                  </svg>
+                  Split View
+                </span>
+              )}
+            </button>
+            <Link href="/browser" className="text-blue-600 hover:text-blue-800">
+              View Browser
+            </Link>
+          </div>
         </div>
       </header>
       
-      <main className="flex-grow overflow-auto p-4 bg-gray-50">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-white shadow rounded-lg p-6 h-[calc(100vh-16rem)]">
-            <ChatBox 
-              initialMessages={messages} 
-              onMessageSent={handleMessageSent} 
-            />
-          </div>
+      <main className="flex-grow overflow-hidden bg-gray-50">
+        <div className="h-full max-w-7xl mx-auto p-4">
+          {isSplitView ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-[calc(100vh-8rem)]">
+              {/* Chat panel */}
+              <div className="bg-white shadow rounded-lg overflow-hidden">
+                <ChatBox 
+                  initialMessages={messages} 
+                  onMessageSent={handleMessageSent} 
+                />
+              </div>
+              
+              {/* Task view panel */}
+              <div className="bg-white shadow rounded-lg overflow-auto">
+                <TaskView />
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white shadow rounded-lg h-[calc(100vh-8rem)]">
+              <ChatBox 
+                initialMessages={messages} 
+                onMessageSent={handleMessageSent} 
+              />
+            </div>
+          )}
         </div>
       </main>
     </div>

@@ -1,0 +1,48 @@
+{
+  "timestamp": "2025-04-07T11:39:40.318817",
+  "results": [
+    {
+      "test_name": "test_nav_01",
+      "description": "Simple URL navigation test",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T11:39:40.482797",
+      "metrics": {
+        "Test Result": "FAILED",
+        "- Task execution error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/v1/agent/execute (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x1042c7830>: Failed to establish a new connection: [Errno 61] Connection refused'))",
+        "errors": [
+          "Task execution error: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/v1/agent/execute (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x1042c7830>: Failed to establish a new connection: [Errno 61] Connection refused'))"
+        ]
+      }
+    },
+    {
+      "test_name": "test_form_01",
+      "description": "Form interaction test with username/password",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T11:39:40.592541",
+      "metrics": {
+        "Test Result": "FAILED",
+        "Typing Indicators Received": "0",
+        "Total Action Feedback Messages": "0",
+        "- Task execution error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/v1/agent/execute (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x101fdb170>: Failed to establish a new connection: [Errno 61] Connection refused'))",
+        "errors": [
+          "Task execution error: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/v1/agent/execute (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x101fdb170>: Failed to establish a new connection: [Errno 61] Connection refused'))"
+        ]
+      }
+    },
+    {
+      "test_name": "test_flow_01",
+      "description": "Multi-step search-click-extract workflow",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T11:39:40.703967",
+      "metrics": {
+        "Test Result": "FAILED",
+        "Screenshots Received": 0,
+        "Action Feedback Messages": 0,
+        "- Task execution error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/v1/agent/execute (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x1041f4bf0>: Failed to establish a new connection: [Errno 61] Connection refused'))",
+        "errors": [
+          "Task execution error: HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/v1/agent/execute (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x1041f4bf0>: Failed to establish a new connection: [Errno 61] Connection refused'))"
+        ]
+      }
+    }
+  ]
+}

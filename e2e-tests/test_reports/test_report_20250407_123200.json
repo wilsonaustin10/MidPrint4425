@@ -1,0 +1,48 @@
+{
+  "timestamp": "2025-04-07T12:31:59.992744",
+  "results": [
+    {
+      "test_name": "test_nav_01",
+      "description": "Simple URL navigation test",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T12:32:00.174231",
+      "metrics": {
+        "Test Result": "FAILED",
+        "- API error": "500 - {\"detail\":\"Error scheduling task execution: 'TaskManager' object has no attribute 'add_task'\"}",
+        "errors": [
+          "API error: 500 - {\"detail\":\"Error scheduling task execution: 'TaskManager' object has no attribute 'add_task'\"}"
+        ]
+      }
+    },
+    {
+      "test_name": "test_form_01",
+      "description": "Form interaction test with username/password",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T12:32:00.292445",
+      "metrics": {
+        "Test Result": "FAILED",
+        "Typing Indicators Received": "0",
+        "Total Action Feedback Messages": "0",
+        "- API error": "500 - {\"detail\":\"Error scheduling task execution: 'TaskManager' object has no attribute 'add_task'\"}",
+        "errors": [
+          "API error: 500 - {\"detail\":\"Error scheduling task execution: 'TaskManager' object has no attribute 'add_task'\"}"
+        ]
+      }
+    },
+    {
+      "test_name": "test_flow_01",
+      "description": "Multi-step search-click-extract workflow",
+      "result": "FAILED",
+      "timestamp": "2025-04-07T12:32:00.413256",
+      "metrics": {
+        "Test Result": "FAILED",
+        "Screenshots Received": 0,
+        "Action Feedback Messages": 0,
+        "- API error": "500 - {\"detail\":\"Error scheduling task execution: 'TaskManager' object has no attribute 'add_task'\"}",
+        "errors": [
+          "API error: 500 - {\"detail\":\"Error scheduling task execution: 'TaskManager' object has no attribute 'add_task'\"}"
+        ]
+      }
+    }
+  ]
+}

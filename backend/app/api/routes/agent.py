@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 import logging
 import asyncio
 import uuid
+import time
 
 from app.agent.service import agent_service
 from app.services.task_manager import task_manager, Task, TaskStatus
@@ -75,6 +76,11 @@ class AgentResponse(BaseModel):
 class TaskResponse(BaseModel):
     """Response model for tasks"""
     task_id: str
+    status: str
+    message: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+    progress: Optional[float] = None
+    logs: Optional[List[str]] = None
 
 class TaskPlanResponse(BaseModel):
     """Response model for task plans"""
@@ -85,6 +91,11 @@ class TaskPlanResponse(BaseModel):
     current_step: int = Field(-1, description="Index of the current step")
     completed_steps: int = Field(0, description="Number of completed steps")
     steps: List[str] = Field([], description="List of step descriptions")
+
+class TaskRequest(BaseModel):
+    """Task request model"""
+    task_id: Optional[str] = None
+    description: str
 
 # Helper function to run agent actions as background tasks
 async def run_agent_action(task_id: str, action_name: str, action_func, *args, **kwargs):
@@ -139,9 +150,8 @@ async def initialize_agent(
     """Initialize the browser agent."""
     try:
         # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description="Initialize browser agent")
-        task_manager.add_task(task)
+        task_id = task_manager.create_task("Initialize browser agent")
+        task = task_manager.get_task(task_id)
         
         # Schedule the task
         background_tasks.add_task(
@@ -165,9 +175,8 @@ async def navigate_to_url(
     """Navigate to a URL."""
     try:
         # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description=f"Navigate to {request.url}")
-        task_manager.add_task(task)
+        task_id = task_manager.create_task(f"Navigate to {request.url}")
+        task = task_manager.get_task(task_id)
         
         # Schedule the task
         background_tasks.add_task(
@@ -192,9 +201,8 @@ async def click_element(
     """Click an element on the page."""
     try:
         # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description=f"Click element '{request.selector}'")
-        task_manager.add_task(task)
+        task_id = task_manager.create_task(f"Click element '{request.selector}'")
+        task = task_manager.get_task(task_id)
         
         # Schedule the task
         background_tasks.add_task(
@@ -221,9 +229,8 @@ async def input_text(
     """Input text into an element."""
     try:
         # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description=f"Input text into '{request.selector}'")
-        task_manager.add_task(task)
+        task_id = task_manager.create_task(f"Input text into '{request.selector}'")
+        task = task_manager.get_task(task_id)
         
         # Schedule the task
         background_tasks.add_task(
@@ -250,9 +257,8 @@ async def get_dom(
     """Get the current DOM of the page."""
     try:
         # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description="Get DOM")
-        task_manager.add_task(task)
+        task_id = task_manager.create_task("Get DOM state")
+        task = task_manager.get_task(task_id)
         
         # Schedule the task
         background_tasks.add_task(
@@ -276,9 +282,8 @@ async def capture_screenshot(
     """Capture a screenshot of the current page."""
     try:
         # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description="Capture screenshot")
-        task_manager.add_task(task)
+        task_id = task_manager.create_task("Capture screenshot")
+        task = task_manager.get_task(task_id)
         
         # Schedule the task
         background_tasks.add_task(
@@ -303,9 +308,8 @@ async def wait(
     """Wait for a specified amount of time."""
     try:
         # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description=f"Wait for {request.time}ms")
-        task_manager.add_task(task)
+        task_id = task_manager.create_task(f"Wait for {request.time}ms")
+        task = task_manager.get_task(task_id)
         
         # Schedule the task
         background_tasks.add_task(
@@ -330,9 +334,8 @@ async def execute_action_sequence(
     """Execute a sequence of actions."""
     try:
         # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description=f"Execute sequence of {len(request.actions)} actions")
-        task_manager.add_task(task)
+        task_id = task_manager.create_task("Execute action sequence")
+        task = task_manager.get_task(task_id)
         
         # Schedule the task
         background_tasks.add_task(
@@ -383,9 +386,8 @@ async def shutdown_agent(
     """Shutdown the agent and close the browser."""
     try:
         # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description="Shutdown browser agent")
-        task_manager.add_task(task)
+        task_id = task_manager.create_task("Shutdown browser agent")
+        task = task_manager.get_task(task_id)
         
         # Schedule the task
         background_tasks.add_task(
@@ -401,66 +403,197 @@ async def shutdown_agent(
         raise HTTPException(status_code=500, detail=f"Error scheduling shutdown: {str(e)}")
 
 @router.post("/execute", response_model=TaskResponse)
-async def execute_natural_language_task(
-    request: NaturalLanguageTaskRequest,
-    background_tasks: BackgroundTasks,
-    user: Dict[str, Any] = Depends(get_authenticated_user)
-):
-    """Execute a task described in natural language."""
-    try:
-        # Create a task
-        task_id = str(uuid.uuid4())
-        task = Task(id=task_id, description=f"Execute task: {request.task}")
-        task_manager.add_task(task)
+async def execute_task(task: TaskRequest) -> TaskResponse:
+    """
+    Execute a task described in natural language.
+    
+    Args:
+        task: Task request containing description and optional parameters
         
-        # Define the execution function
-        async def execute_llm_task():
+    Returns:
+        Task response with execution status and results
+    """
+    try:
+        # Create task
+        task_id = task.task_id or f"task_{int(time.time())}"
+        task_manager.create_task(task_id, task.description)
+        
+        # Execute task asynchronously
+        async def execute():
             try:
-                # Start the task
-                task = task_manager.get_task(task_id)
-                if not task:
-                    logger.error(f"Task {task_id} not found")
+                # Initialize agent if needed
+                init_result = await agent_service.ensure_initialized()
+                if init_result["status"] != "success":
+                    error_msg = f"Failed to initialize agent: {init_result['message']}"
+                    logger.error(error_msg)
+                    task_manager.fail(task_id, error_msg)
                     return
                 
-                task.start()
-                task.log(f"Executing natural language task: {request.task}")
+                # Execute task
+                result = await agent_service.execute_from_natural_language(
+                    task.description,
+                    task_id
+                )
                 
-                # Execute the task with multi-step option
-                if request.enable_multi_step:
-                    task.log("Multi-step planning enabled")
-                
-                # Execute the task
-                result = await agent_service.execute_from_natural_language(request.task)
-                
-                # Update the task based on the result
-                if result.get("status") == "success":
-                    # Filter out raw response if not requested
-                    if not request.include_raw_response and "raw_response" in result:
-                        del result["raw_response"]
-                    
-                    task.complete(result)
-                    task.log(f"Successfully executed task")
+                # Handle execution result
+                if result["status"] != "success":
+                    error_msg = result.get("message", "Unknown error")
+                    logger.error(f"Task execution failed: {error_msg}")
+                    task_manager.fail(task_id, error_msg)
                 else:
-                    error_msg = result.get("message", "Failed to execute task")
-                    task.fail(error_msg)
-                    task.log(f"Error: {error_msg}")
-            
+                    logger.info(f"Task executed successfully: {task_id}")
+                    task_manager.complete(task_id, result)
+                    
             except Exception as e:
-                logger.error(f"Error executing task: {str(e)}")
-                
-                # Update task with error
-                task = task_manager.get_task(task_id)
-                if task:
-                    task.fail(str(e))
-                    task.log(f"Exception: {str(e)}")
+                error_msg = f"Task execution error: {str(e)}"
+                logger.error(error_msg)
+                task_manager.fail(task_id, error_msg)
         
-        # Schedule the task
-        background_tasks.add_task(execute_llm_task)
+        # Start execution in background
+        asyncio.create_task(execute())
         
-        return {"task_id": task_id}
+        # Return initial response
+        return TaskResponse(
+            task_id=task_id,
+            status="pending",
+            message="Task started successfully"
+        )
+        
     except Exception as e:
-        logger.error(f"Error scheduling task execution: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error scheduling task execution: {str(e)}")
+        error_msg = f"Error starting task: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
+
+@router.get("/status/{task_id}", response_model=TaskResponse)
+async def get_task_status(task_id: str) -> TaskResponse:
+    """
+    Get the current status of a task.
+    
+    Args:
+        task_id: Task identifier
+        
+    Returns:
+        Task response with current status and results
+    """
+    try:
+        task = task_manager.get_task(task_id)
+        if not task:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Task not found: {task_id}"
+            )
+            
+        return TaskResponse(
+            task_id=task_id,
+            status=task.status,
+            message=task.message,
+            result=task.result,
+            progress=task.progress,
+            logs=task.logs
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Error getting task status: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
+
+@router.post("/reset", response_model=Dict[str, str])
+async def reset_agent() -> Dict[str, str]:
+    """
+    Reset the agent's state and browser.
+    
+    Returns:
+        Dictionary with reset status
+    """
+    try:
+        await agent_service._cleanup()
+        return {"status": "success", "message": "Agent reset successfully"}
+    except Exception as e:
+        error_msg = f"Error resetting agent: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
+
+@router.get("/actions", response_model=Dict[str, Any])
+async def list_actions() -> Dict[str, Any]:
+    """
+    List available browser actions.
+    
+    Returns:
+        Dictionary with available actions and their descriptions
+    """
+    try:
+        # Ensure agent is initialized
+        init_result = await agent_service.ensure_initialized()
+        if init_result["status"] != "success":
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to initialize agent: {init_result['message']}"
+            )
+            
+        return {
+            "status": "success",
+            "actions": agent_service.controller.list_actions()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Error listing actions: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
+
+@router.get("/screenshot", response_model=Dict[str, Any])
+async def get_screenshot() -> Dict[str, Any]:
+    """
+    Get the most recent screenshot.
+    
+    Returns:
+        Dictionary with screenshot data
+    """
+    try:
+        # Ensure agent is initialized
+        init_result = await agent_service.ensure_initialized()
+        if init_result["status"] != "success":
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to initialize agent: {init_result['message']}"
+            )
+            
+        screenshot = agent_service.current_state.get("last_screenshot")
+        if not screenshot:
+            return {
+                "status": "error",
+                "message": "No screenshot available"
+            }
+            
+        return {
+            "status": "success",
+            "screenshot": screenshot
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Error getting screenshot: {str(e)}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
 
 @router.get("/task-plan", response_model=TaskPlanResponse)
 async def get_task_plan(
@@ -560,31 +693,4 @@ async def list_available_actions(
         }
     except Exception as e:
         logger.error(f"Error listing actions: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error listing actions: {str(e)}")
-
-@router.get("/screenshot", response_model=Dict[str, Any])
-async def get_current_screenshot(
-    user: Dict[str, Any] = Depends(get_authenticated_user)
-):
-    """Get the most recent screenshot."""
-    try:
-        # Check if browser is initialized
-        if not browser_manager.is_initialized:
-            # Return a service unavailable status code instead of a bad request
-            # since this is a temporary condition that can be resolved
-            raise HTTPException(
-                status_code=503, 
-                detail="Browser not initialized. Please try again later or initialize the browser first."
-            )
-            
-        screenshot = await agent_service.capture_screenshot(full_page=True)
-        return {
-            "status": "success",
-            "screenshot": screenshot.get("screenshot")
-        }
-    except HTTPException:
-        # Re-raise HTTP exceptions as-is to preserve status codes
-        raise
-    except Exception as e:
-        logger.error(f"Error getting screenshot: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error getting screenshot: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error listing actions: {str(e)}") 

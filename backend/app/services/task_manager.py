@@ -103,11 +103,41 @@ class Task:
         Args:
             message: Log message
         """
-        self.logs.append({
+        log_entry = {
             "timestamp": datetime.now().isoformat(),
             "message": message
-        })
+        }
+        self.logs.append(log_entry)
         logger.debug(f"Task {self.task_id}: {message}")
+        
+        # Notify subscribers about the log update
+        asyncio.create_task(self._notify_subscribers(log_entry))
+    
+    async def _notify_subscribers(self, log_entry: Dict[str, Any]) -> None:
+        """
+        Notify subscribers about a task update.
+        
+        Args:
+            log_entry: The log entry to send to subscribers
+        """
+        try:
+            # Get task manager instance
+            task_manager = globals().get("task_manager")
+            if not task_manager:
+                return
+            
+            # Get task state
+            task_state = self.to_dict()
+            task_state["latest_log"] = log_entry
+            
+            # Notify subscribers
+            for subscriber_key, subscriber_callback in task_manager.subscribers.items():
+                try:
+                    await subscriber_callback(self.task_id, task_state)
+                except Exception as e:
+                    logger.error(f"Error notifying subscriber '{subscriber_key}' about task {self.task_id}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error notifying subscribers for task {self.task_id}: {str(e)}")
     
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -201,7 +231,7 @@ class TaskManager:
         """
         return [task.to_dict() for task in self.tasks.values()]
     
-    def cancel_task(self, task_id: str) -> bool:
+    async def cancel_task(self, task_id: str) -> bool:
         """
         Cancel a running task.
         
@@ -224,7 +254,7 @@ class TaskManager:
             del self.running_tasks[task_id]
             
         # Notify subscribers of task update
-        asyncio.create_task(self._notify_task_update(task_id))
+        await self._notify_task_update(task_id)
         
         return True
     
@@ -268,7 +298,7 @@ class TaskManager:
             return
         
         task.start()
-        self._notify_task_update(task_id)
+        await self._notify_task_update(task_id)
         
         try:
             # Create an asyncio task and store it
@@ -290,7 +320,7 @@ class TaskManager:
             task.fail(error_msg)
         finally:
             # Notify about the final state
-            self._notify_task_update(task_id)
+            await self._notify_task_update(task_id)
             
             # Clean up
             if task_id in self.running_tasks:

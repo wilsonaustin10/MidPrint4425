@@ -1,0 +1,356 @@
+#!/usr/bin/env python3
+"""
+MidPrint Test Results Dashboard
+A simple Flask web application to visualize test results and metrics.
+"""
+import os
+import json
+import glob
+from flask import Flask, render_template, jsonify, send_from_directory
+from datetime import datetime
+
+app = Flask(__name__)
+
+# Create templates directory if it doesn't exist
+os.makedirs('templates', exist_ok=True)
+
+# Create a simple HTML template
+with open('templates/index.html', 'w') as f:
+    f.write("""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MidPrint Test Dashboard</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .test-card {
+            margin-bottom: 20px;
+            transition: all 0.3s;
+        }
+        .test-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .test-pass {
+            border-left: 5px solid #28a745;
+        }
+        .test-fail {
+            border-left: 5px solid #dc3545;
+        }
+        .metrics-container {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .dashboard-header {
+            background-color: #343a40;
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-header">
+        <div class="container">
+            <h1>MidPrint Test Dashboard</h1>
+            <p>End-to-end test results and performance metrics</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Test Status Summary</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="testStatusChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Performance Metrics</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="performanceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <h2>Test Details</h2>
+        <div class="row" id="testCards">
+            <!-- Test cards will be inserted here -->
+            <div class="col-12 text-center py-5">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2">Loading test results...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Fetch test data
+        fetch('/api/test-results')
+            .then(response => response.json())
+            .then(data => {
+                renderTestCards(data);
+                renderCharts(data);
+            })
+            .catch(error => {
+                console.error('Error fetching test data:', error);
+                document.getElementById('testCards').innerHTML = 
+                    '<div class="col-12 text-center py-5"><div class="alert alert-danger">Error loading test results</div></div>';
+            });
+            
+        function renderTestCards(data) {
+            const container = document.getElementById('testCards');
+            container.innerHTML = '';
+            
+            data.tests.forEach(test => {
+                const cardClass = test.result === 'PASSED' ? 'test-pass' : 'test-fail';
+                const statusBadge = test.result === 'PASSED' 
+                    ? '<span class="badge bg-success">PASSED</span>'
+                    : '<span class="badge bg-danger">FAILED</span>';
+                    
+                const metricsHtml = Object.entries(test.metrics)
+                    .filter(([key, value]) => key !== 'errors' && value !== null)
+                    .map(([key, value]) => {
+                        if (key.includes('time') && key !== 'start_time') {
+                            // Format time difference in seconds
+                            const diffSeconds = (value - test.metrics.start_time).toFixed(2);
+                            return `<tr><td>${formatMetricName(key)}</td><td>${diffSeconds}s</td></tr>`;
+                        }
+                        return `<tr><td>${formatMetricName(key)}</td><td>${value}</td></tr>`;
+                    })
+                    .join('');
+                    
+                const errorsHtml = test.metrics.errors && test.metrics.errors.length
+                    ? `
+                    <div class="mt-3">
+                        <h6>Errors (${test.metrics.errors.length}):</h6>
+                        <ul class="list-group">
+                            ${test.metrics.errors.map(err => `<li class="list-group-item list-group-item-danger">${err}</li>`).join('')}
+                        </ul>
+                    </div>`
+                    : '';
+                
+                const card = `
+                <div class="col-md-6">
+                    <div class="card test-card ${cardClass}">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5>${test.name}</h5>
+                            ${statusBadge}
+                        </div>
+                        <div class="card-body">
+                            <p>${test.description}</p>
+                            <div class="metrics-container">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Metric</th>
+                                            <th>Value</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${metricsHtml}
+                                    </tbody>
+                                </table>
+                                ${errorsHtml}
+                            </div>
+                        </div>
+                        <div class="card-footer text-muted">
+                            Ran at: ${new Date(test.timestamp).toLocaleString()}
+                        </div>
+                    </div>
+                </div>`;
+                
+                container.innerHTML += card;
+            });
+        }
+        
+        function formatMetricName(key) {
+            return key
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, l => l.toUpperCase());
+        }
+        
+        function renderCharts(data) {
+            // Prepare data for the test status chart
+            const statusLabels = ['Passed', 'Failed'];
+            const passCount = data.tests.filter(t => t.result === 'PASSED').length;
+            const failCount = data.tests.filter(t => t.result !== 'PASSED').length;
+            
+            new Chart(document.getElementById('testStatusChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: statusLabels,
+                    datasets: [{
+                        data: [passCount, failCount],
+                        backgroundColor: ['#28a745', '#dc3545']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+            
+            // Prepare performance metrics chart
+            // Extract relevant metrics for comparison
+            const testNames = data.tests.map(t => t.name);
+            const firstScreenshotTimes = data.tests.map(t => {
+                if (t.metrics.first_screenshot_time && t.metrics.start_time) {
+                    return (t.metrics.first_screenshot_time - t.metrics.start_time).toFixed(2);
+                }
+                return 0;
+            });
+            
+            const completionTimes = data.tests.map(t => {
+                // Use workflow_completion_time or the last available time metric
+                let completionTime = t.metrics.workflow_completion_time || 
+                                     t.metrics.form_completion_time || 
+                                     t.metrics.navigation_completion_time;
+                if (completionTime && t.metrics.start_time) {
+                    return (completionTime - t.metrics.start_time).toFixed(2);
+                }
+                return 0;
+            });
+            
+            new Chart(document.getElementById('performanceChart'), {
+                type: 'bar',
+                data: {
+                    labels: testNames,
+                    datasets: [
+                        {
+                            label: 'First Screenshot (s)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                            borderColor: 'rgb(54, 162, 235)',
+                            borderWidth: 1,
+                            data: firstScreenshotTimes
+                        },
+                        {
+                            label: 'Completion Time (s)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                            borderColor: 'rgb(255, 99, 132)',
+                            borderWidth: 1,
+                            data: completionTimes
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Seconds'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+    """)
+
+@app.route('/')
+def index():
+    """Serve the dashboard homepage"""
+    return render_template('index.html')
+
+@app.route('/api/test-results')
+def get_test_results():
+    """API endpoint to get test results"""
+    results_dir = os.path.join(os.path.dirname(__file__), 'results')
+    
+    # Create results directory if it doesn't exist
+    os.makedirs(results_dir, exist_ok=True)
+    
+    # Find all JSON result files
+    result_files = glob.glob(os.path.join(results_dir, '*.json'))
+    
+    # If no result files, return example data
+    if not result_files:
+        return jsonify(get_example_data())
+    
+    # Load the most recent result file
+    result_files.sort(key=os.path.getmtime, reverse=True)
+    with open(result_files[0], 'r') as f:
+        data = json.load(f)
+    
+    return jsonify(data)
+
+def get_example_data():
+    """Generate example data for testing the dashboard"""
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "tests": [
+            {
+                "name": "NAV-01",
+                "description": "Simple URL navigation test",
+                "result": "PASSED",
+                "timestamp": datetime.now().isoformat(),
+                "metrics": {
+                    "start_time": datetime.now().timestamp(),
+                    "first_screenshot_time": datetime.now().timestamp() + 1.2,
+                    "navigation_completion_time": datetime.now().timestamp() + 2.5,
+                    "screenshot_count": 3,
+                    "action_count": 1,
+                    "errors": []
+                }
+            },
+            {
+                "name": "FORM-01",
+                "description": "Form interaction test",
+                "result": "PASSED",
+                "timestamp": datetime.now().isoformat(),
+                "metrics": {
+                    "start_time": datetime.now().timestamp(),
+                    "first_screenshot_time": datetime.now().timestamp() + 1.3,
+                    "form_completion_time": datetime.now().timestamp() + 3.8,
+                    "screenshot_count": 5,
+                    "action_count": 3,
+                    "errors": []
+                }
+            },
+            {
+                "name": "FLOW-01",
+                "description": "Multi-step workflow test",
+                "result": "FAILED",
+                "timestamp": datetime.now().isoformat(),
+                "metrics": {
+                    "start_time": datetime.now().timestamp(),
+                    "first_screenshot_time": datetime.now().timestamp() + 1.4,
+                    "navigation_time": datetime.now().timestamp() + 2.1,
+                    "search_submission_time": datetime.now().timestamp() + 4.3,
+                    "result_click_time": None,
+                    "extraction_time": None,
+                    "workflow_completion_time": None,
+                    "screenshot_count": 3,
+                    "action_count": 2,
+                    "errors": ["Step click_result did not complete", "Step extract_data did not complete"]
+                }
+            }
+        ]
+    }
+
+if __name__ == '__main__':
+    print("Starting MidPrint Test Dashboard")
+    print("Open http://localhost:5000 in your browser to view test results")
+    app.run(debug=True) 

@@ -1,7 +1,6 @@
 'use client'
 
 import React, { useState, useRef, useEffect } from 'react';
-import { llmAPI } from '../lib/api';
 import LoadingDots from './LoadingDots';
 import StatusMessage, { StatusType } from './StatusMessage';
 import MarkdownContent from './MarkdownContent';
@@ -76,6 +75,13 @@ export default function ChatBox({ initialMessages = [], onMessageSent }: ChatBox
     scrollToBottom();
   }, [messages]);
 
+  // Update messages when initialMessages change
+  useEffect(() => {
+    if (initialMessages.length > 0) {
+      setMessages(initialMessages);
+    }
+  }, [initialMessages]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -91,97 +97,26 @@ export default function ChatBox({ initialMessages = [], onMessageSent }: ChatBox
     // Add user message to chat
     const userMessage: Message = { role: 'user', content: input };
     setMessages(prev => [...prev, userMessage]);
-    onMessageSent?.(userMessage);
     
-    setInput('');
-    setIsLoading(true);
-    
-    try {
-      // In the future, this will call the actual API
-      // const response = await llmAPI.processInstruction(input);
-      
-      // For now, simulate a response with random delays, occasional errors, and markdown
-      const responseType = Math.random();
-      const shouldFail = responseType < 0.1; // 10% chance of failure
-      const shouldIncludeMarkdown = responseType >= 0.1 && responseType < 0.5; // 40% chance of markdown
-      const shouldIncludeTasks = responseType >= 0.5 && responseType < 0.8; // 30% chance of tasks
-      // 20% chance of plain text response
-      
-      setTimeout(() => {
-        if (shouldFail) {
-          throw new Error('Failed to process your request');
-        }
-        
-        let botResponse: Message;
-        
-        if (shouldIncludeMarkdown) {
-          botResponse = {
-            role: 'assistant',
-            content: `
-# Response to your query
-
-I'll help you with "${input}". Here's what you need to know:
-
-## Key points
-- This is a markdown-formatted response
-- It supports **bold** and *italic* text
-- It also supports \`code blocks\` and more
-
-## Code example
-\`\`\`javascript
-function example() {
-  console.log("Hello world!");
-  return true;
-}
-\`\`\`
-
-## Additional information
-> This is a blockquote with important information
-> You can use it for highlighting key points
-
-Let me know if you need anything else!
-            `,
-            status: 'success',
-            isMarkdown: true
-          };
-        } else if (shouldIncludeTasks) {
-          botResponse = {
-            role: 'assistant',
-            content: 'Here\'s the current progress of your project tasks:',
-            status: 'success',
-            tasks: sampleTasks
-          };
+    // Call the onMessageSent callback if provided
+    if (onMessageSent) {
+      setIsLoading(true);
+      try {
+        await onMessageSent(userMessage);
+      } catch (error) {
+        console.error('Error in onMessageSent callback:', error);
+        if (error instanceof Error) {
+          setError(error.message);
         } else {
-          botResponse = {
-            role: 'assistant',
-            content: `I'll help you with "${input}". This is a standard plain text response.`,
-            status: 'success'
-          };
+          setError('An unexpected error occurred');
         }
-        
-        setMessages(prev => [...prev, botResponse]);
+      } finally {
         setIsLoading(false);
-      }, 1000 + Math.random() * 2000); // Random delay between 1-3 seconds
-    } catch (error) {
-      console.error('Error processing message:', error);
-      setIsLoading(false);
-      
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError('An unexpected error occurred');
       }
-      
-      // Add error message
-      setMessages(prev => [
-        ...prev, 
-        { 
-          role: 'assistant', 
-          content: 'Sorry, there was an error processing your request. Please try again.',
-          status: 'error'
-        }
-      ]);
     }
+    
+    // Clear the input field
+    setInput('');
   };
 
   const retryLastMessage = () => {

@@ -10,9 +10,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 load_dotenv()
 
 @pytest.fixture(scope="session")
-def event_loop():
-    """Create an event loop for asyncio tests"""
+def event_loop_policy():
+    """Configure the event loop policy for tests"""
     import asyncio
-    loop = asyncio.get_event_loop_policy().new_event_loop()
+    return asyncio.get_event_loop_policy()
+
+@pytest.fixture
+def event_loop(event_loop_policy):
+    """Create an event loop for each test"""
+    loop = event_loop_policy.new_event_loop()
     yield loop
     loop.close() 
