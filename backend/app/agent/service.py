@@ -15,7 +15,7 @@ import json
 import asyncio
 import time
 import os
-from app.task.service import task_manager
+from app.services.task_manager import task_manager
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -663,435 +663,415 @@ class AgentService:
             logger.info(f"Task interpreted: {task_description} -> {action_plan['action']}")
             return {
                 "status": "success",
-                "action_plan": action_plan,
-                "raw_response": llm_response
+                "action_plan": action_plan
             }
         except ActionValidationError as e:
             error_msg = f"Invalid action plan: {str(e)}"
             self.current_state["last_error"] = error_msg
             logger.error(error_msg)
-            return {"status": "error", "message": error_msg, "raw_response": llm_response if 'llm_response' in locals() else None}
+            return {"status": "error", "message": error_msg}
         except Exception as e:
             error_msg = f"Task interpretation error: {str(e)}"
             self.current_state["last_error"] = error_msg
             logger.error(error_msg)
             return {"status": "error", "message": error_msg}
     
-    async def execute_from_natural_language(self, task_description: str, task_id: str = None) -> Dict[str, Any]:
+    async def create_task_plan(self, task_description: str, current_state: Dict[str, Any] = None) -> Dict[str, Any]:
         """
-        Execute a task described in natural language.
+        Use LLM to create a plan for a natural language task.
         
         Args:
             task_description: Natural language description of the task
+            current_state: Optional current state to provide context to the LLM
+            
+        Returns:
+            Dictionary with the plan without raw LLM response
+        """
+        try:
+            if not self.llm_service or not self.message_manager or not self.response_parser:
+                raise ValueError("LLM components not initialized. Call initialize() first.")
+                
+            # Read system prompt
+            system_prompt_path = os.path.join(os.path.dirname(__file__), "system_prompt.md")
+            with open(system_prompt_path, "r") as f:
+                system_prompt = f.read()
+            
+            # Add page state context if available
+            page_state = current_state.get("page_state", {}) if current_state else {}
+            if page_state:
+                # Prepare a simplified representation of the page state for the LLM
+                page_context = f"""
+                Current page: {page_state.get('url', 'Unknown')}
+                Page title: {page_state.get('title', 'Unknown')}
+                Available elements:
+                """
+                
+                # Add information about interactive elements if available
+                if "elements" in page_state:
+                    for i, element in enumerate(page_state["elements"]):
+                        element_type = element.get("type", "unknown")
+                        element_text = element.get("text", "")[:50]  # Truncate long text
+                        page_context += f"  {i}: {element_type} - {element_text}\n"
+                
+                # Add page context to the task description
+                augmented_task = f"Current page state:\n{page_context}\n\nUser task: {task_description}"
+            else:
+                augmented_task = task_description
+                
+            # Add user message to conversation history
+            self.message_manager.add_user_message(task_description)
+            
+            # Generate LLM response
+            llm_response = await self.llm_service.generate_response(
+                system_prompt=system_prompt,
+                user_input=augmented_task,
+                conversation_history=self.message_manager.get_messages()[:-1]  # Exclude the message we just added
+            )
+            
+            # Parse the response
+            action_plan = self.response_parser.parse_response(llm_response)
+            
+            # Add assistant message to conversation history
+            self.message_manager.add_assistant_message(llm_response)
+            
+            # Start task planning in the message manager if the action is plan_task
+            if action_plan["action"] == "plan_task":
+                self.message_manager.start_task_planning(task_description)
+                self.message_manager.set_task_steps(action_plan["parameters"].get("steps", []))
+                
+                # Return the plan
+                return {
+                    "status": "success",
+                    "plan": {
+                        "steps": action_plan["parameters"].get("steps", []),
+                        "thought": action_plan["parameters"].get("thought", "")
+                    }
+                }
+            else:
+                # For single actions, create a one-step plan
+                self.message_manager.start_task_planning(task_description)
+                self.message_manager.set_task_steps([f"Execute {action_plan['action']}"])
+                
+                return {
+                    "status": "success",
+                    "plan": {
+                        "steps": [f"Execute {action_plan['action']}"],
+                        "thought": "This is a single-step task"
+                    }
+                }
+                
+        except ActionValidationError as e:
+            error_msg = f"Invalid action plan: {str(e)}"
+            self.current_state["last_error"] = error_msg
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg}
+        except Exception as e:
+            error_msg = f"Task planning error: {str(e)}"
+            self.current_state["last_error"] = error_msg
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg}
+    
+    async def execute_step(self, step: Dict[str, Any], task_id: str = None) -> Dict[str, Any]:
+        """
+        Execute a specific step in a task plan.
+        
+        Args:
+            step: The step to execute with description and other metadata
             task_id: Optional task ID for tracking
             
         Returns:
             Dictionary with execution results
         """
         try:
-            # Ensure agent is initialized
-            init_result = await self.ensure_initialized()
-            if init_result["status"] != "success":
-                error_msg = f"Failed to initialize agent: {init_result['message']}"
-                logger.error(error_msg)
-                task_manager.fail(task_id, error_msg)
-                return {"status": "error", "message": error_msg}
+            # Extract step info
+            step_description = step.get("description", "")
+            logger.info(f"Executing step: {step_description}")
             
-            # Start task tracking
-            if task_id:
-                task_manager.start(task_id)
-                task_manager.add_log(task_id, f"Starting task: {task_description}")
+            # Create a message for this step
+            if self.message_manager:
+                self.message_manager.add_system_message(f"Executing step: {step_description}")
             
-            # Get current page state for context
-            try:
-                page_state = await self.browser.get_page_state()
-            except Exception as e:
-                page_state = {"error": str(e)}
-            
-            # Update conversation history with task
-            self.message_manager.add_user_message(task_description)
-            
-            # Get LLM response
-            try:
-                llm_response = await self.llm_service.get_response(
-                    self.message_manager.get_messages(),
-                    page_state
-                )
+            # Generate action plan for this step
+            system_prompt_path = os.path.join(os.path.dirname(__file__), "system_prompt.md")
+            with open(system_prompt_path, "r") as f:
+                system_prompt = f.read()
                 
-                # Parse and validate response
-                try:
-                    action_plan = self.response_parser.parse_response(llm_response)
-                except ActionValidationError as e:
-                    error_msg = f"Invalid action plan: {str(e)}"
-                    logger.error(error_msg)
-                    if task_id:
-                        task_manager.fail(task_id, error_msg)
-                    return {"status": "error", "message": error_msg}
+            # Generate the step action plan
+            step_action_prompt = f"Execute this step: {step_description}"
+            if self.current_state.get("current_url"):
+                step_action_prompt += f"\nCurrent URL: {self.current_state.get('current_url')}"
                 
-                # Execute each action in the plan
-                results = []
-                for action in action_plan:
-                    try:
-                        # Update task progress
-                        if task_id:
-                            progress = (len(results) + 1) / len(action_plan) * 100
-                            task_manager.update_progress(task_id, progress, f"Executing action: {action['action']}")
-                        
-                        # Execute the action
-                        action_result = await self.controller.execute_action(
-                            action["action"],
-                            action.get("params", {})
-                        )
-                        
-                        # Handle action result
-                        if action_result["status"] != "success":
-                            error_msg = f"Action failed: {action_result.get('message', 'Unknown error')}"
-                            logger.error(error_msg)
-                            if task_id:
-                                task_manager.fail(task_id, error_msg)
-                            return {"status": "error", "message": error_msg}
-                        
-                        # Add result to history
-                        results.append({
-                            "action": action["action"],
-                            "params": action.get("params", {}),
-                            "result": action_result["result"]
-                        })
-                        
-                        # Update conversation history
-                        self.message_manager.add_assistant_message(
-                            f"Executed {action['action']} successfully"
-                        )
-                        
-                    except Exception as e:
-                        error_msg = f"Error executing action {action['action']}: {str(e)}"
-                        logger.error(error_msg)
-                        if task_id:
-                            task_manager.fail(task_id, error_msg)
-                        return {"status": "error", "message": error_msg}
+            llm_response = await self.llm_service.generate_response(
+                system_prompt=system_prompt,
+                user_input=step_action_prompt,
+                conversation_history=self.message_manager.get_messages()
+            )
+            
+            # Parse response into an action plan
+            action_plan = self.response_parser.parse_response(llm_response)
+            
+            # Add message to history
+            self.message_manager.add_assistant_message(llm_response)
+            
+            # Execute the action based on the action plan
+            action_name = action_plan.get("action", "")
+            action_params = action_plan.get("parameters", {})
+            
+            if action_name == "execute_step":
+                # Handle nested execute_step (common for multi-step tasks)
+                inner_action = action_params.get("action", "")
+                inner_params = action_params.get("parameters", {})
                 
-                # Complete task successfully
-                if task_id:
-                    task_manager.complete(task_id, {"results": results})
-                
-                return {
-                    "status": "success",
-                    "results": results,
-                    "conversation": self.message_manager.get_messages()
-                }
-                
-            except Exception as e:
-                error_msg = f"LLM error: {str(e)}"
-                logger.error(error_msg)
-                if task_id:
-                    task_manager.fail(task_id, error_msg)
-                return {"status": "error", "message": error_msg}
-            
-        except Exception as e:
-            error_msg = f"Task execution error: {str(e)}"
-            logger.error(error_msg)
-            if task_id:
-                task_manager.fail(task_id, error_msg)
-            return {"status": "error", "message": error_msg}
-    
-    async def _handle_plan_task(self, task_description: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle the plan_task action, which breaks down a complex task into steps.
-        
-        Args:
-            task_description: The original task description from the user
-            parameters: The action parameters, including 'steps' and 'thought'
-            
-        Returns:
-            Dictionary with planning result information
-        """
-        try:
-            steps = parameters.get("steps", [])
-            thought = parameters.get("thought", "")
-            
-            if not steps:
-                error_msg = "No steps provided in plan_task action"
-                self.current_state["last_error"] = error_msg
-                logger.error(error_msg)
-                return {"status": "error", "message": error_msg}
-            
-            # Start task planning in the message manager
-            self.message_manager.start_task_planning(task_description)
-            self.message_manager.set_task_steps(steps)
-            
-            # Update the current state
-            self.current_state["multi_step_tasks"]["active"] = True
-            self.current_state["multi_step_tasks"]["current_plan"] = {
-                "original_task": task_description,
-                "steps": steps,
-                "current_step_index": 0,
-                "completed_steps": [],
-                "status": "executing"
-            }
-            
-            # Add to history
-            self.current_state["history"].append({
-                "task": task_description,
-                "action": "plan_task",
-                "timestamp": time.time(),
-                "result": "success",
-                "steps": steps
-            })
-            
-            logger.info(f"Created task plan with {len(steps)} steps for: {task_description}")
-            
-            # Return information about the plan
-            return {
-                "status": "success",
-                "message": f"Task plan created with {len(steps)} steps",
-                "thought": thought,
-                "action": "plan_task",
-                "parameters": parameters,
-                "plan": {
-                    "steps": steps,
-                    "current_step_index": 0,
-                    "total_steps": len(steps)
-                }
-            }
-        except Exception as e:
-            error_msg = f"Error creating task plan: {str(e)}"
-            self.current_state["last_error"] = error_msg
-            logger.error(error_msg)
-            return {"status": "error", "message": error_msg}
-    
-    async def _handle_execute_step(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle the execute_step action, which executes a step in a multi-step task plan.
-        
-        Args:
-            parameters: The action parameters, including 'step_index', 'action', and 'parameters'
-            
-        Returns:
-            Dictionary with execution result information
-        """
-        try:
-            step_index = parameters.get("step_index", -1)
-            action = parameters.get("action", "")
-            action_parameters = parameters.get("parameters", {})
-            
-            # Check if there's an active task plan
-            if not self.current_state["multi_step_tasks"]["active"]:
-                error_msg = "No active task plan for execute_step action"
-                self.current_state["last_error"] = error_msg
-                logger.error(error_msg)
-                return {"status": "error", "message": error_msg}
-            
-            # Check if the step index is valid
-            if (step_index < 0 or 
-                step_index >= len(self.current_state["multi_step_tasks"]["current_plan"]["steps"])):
-                error_msg = f"Invalid step_index: {step_index}"
-                self.current_state["last_error"] = error_msg
-                logger.error(error_msg)
-                return {"status": "error", "message": error_msg}
-            
-            # Get the current plan and step
-            current_plan = self.current_state["multi_step_tasks"]["current_plan"]
-            current_step = current_plan["steps"][step_index]
-            
-            # Log the step execution
-            logger.info(f"Executing step {step_index + 1}: '{current_step}' with action: {action}")
-            
-            # Start the step in the message manager
-            step_info = self.message_manager.start_step(step_index)
-            if "error" in step_info:
-                return {"status": "error", "message": step_info["error"]}
-            
-            # Execute the action for this step
-            result = await self.execute_action(action, action_parameters)
-            
-            # Add to history
-            self.current_state["history"].append({
-                "task": f"Step {step_index + 1}: {current_step}",
-                "action": action,
-                "timestamp": time.time(),
-                "result": result["status"],
-                "step_index": step_index
-            })
-            
-            # Handle success or failure
-            if result["status"] == "success":
-                # Complete the step in the message manager
-                completion_info = self.message_manager.complete_step(step_index, result)
-                
-                # Update the current state
-                current_plan["completed_steps"].append({
-                    "index": step_index,
-                    "description": current_step,
-                    "action": action,
-                    "parameters": action_parameters,
-                    "result": result,
-                    "timestamp": time.time()
-                })
-                
-                # Check if there are more steps
-                if "next_step" in completion_info:
-                    # Move to the next step
-                    next_step_index = completion_info["next_step"]["index"]
-                    current_plan["current_step_index"] = next_step_index
-                    
-                    return {
-                        "status": "success",
-                        "message": f"Step {step_index + 1} completed successfully, moving to step {next_step_index + 1}",
-                        "action": action,
-                        "parameters": action_parameters,
-                        "result": result,
-                        "next_step": {
-                            "index": next_step_index,
-                            "description": current_plan["steps"][next_step_index]
-                        }
-                    }
-                else:
-                    # All steps completed
-                    current_plan["status"] = "completed"
-                    current_plan["current_step_index"] = -1  # No current step
-                    
-                    return {
-                        "status": "success",
-                        "message": "All steps completed successfully",
-                        "action": action,
-                        "parameters": action_parameters,
-                        "result": result,
-                        "task_completed": True,
-                        "steps_executed": len(current_plan["completed_steps"])
-                    }
+                result = await self.execute_action(inner_action, inner_params, task_id)
             else:
-                # Step failed
-                error_message = result.get("message", "Unknown error")
-                failure_info = self.message_manager.fail_step(step_index, error_message)
-                
-                # Update the current state
-                current_plan["status"] = "failed"
-                
-                return {
-                    "status": "error",
-                    "message": f"Step {step_index + 1} failed: {error_message}",
-                    "action": action,
-                    "parameters": action_parameters,
-                    "result": result,
-                    "step_index": step_index
-                }
+                # Execute the action directly
+                result = await self.execute_action(action_name, action_params, task_id)
+            
+            # Record the result
+            return {
+                "status": result.get("status", "error"),
+                "action": action_name,
+                "description": step_description,
+                "message": result.get("message", ""),
+                "result": result
+            }
         except Exception as e:
             error_msg = f"Error executing step: {str(e)}"
-            self.current_state["last_error"] = error_msg
-            logger.error(error_msg)
-            return {"status": "error", "message": error_msg}
-    
-    async def get_task_plan_status(self) -> Dict[str, Any]:
-        """
-        Get the current status of the active task plan.
-        
-        Returns:
-            Dictionary with task plan status information
-        """
-        if not self.message_manager:
+            logger.error(error_msg, exc_info=True)
             return {
-                "status": "error",
-                "message": "Message manager not initialized"
+                "status": "error", 
+                "message": error_msg,
+                "description": step.get("description", "Unknown step")
             }
-            
-        plan_status = self.message_manager.get_task_plan_status()
-        
-        return {
-            "status": "success",
-            "task_plan": plan_status
-        }
     
-    async def reset_task_plan(self) -> Dict[str, Any]:
+    async def execute_from_natural_language(self, task_description: str, task_id: str = None) -> Dict[str, Any]:
         """
-        Reset the current task plan.
-        
-        Returns:
-            Dictionary with reset status
-        """
-        if not self.message_manager:
-            return {
-                "status": "error",
-                "message": "Message manager not initialized"
-            }
-            
-        # Reset the task plan in the message manager
-        self.message_manager.task_plan = {
-            "active": False,
-            "steps": [],
-            "current_step_index": -1,
-            "completed_steps": [],
-            "status": "idle",
-            "original_task": None
-        }
-        
-        # Reset the state in the agent
-        self.current_state["multi_step_tasks"] = {
-            "active": False,
-            "current_plan": None
-        }
-        
-        logger.info("Task plan reset")
-        return {
-            "status": "success",
-            "message": "Task plan reset successfully"
-        }
-    
-    async def execute_action(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute a specific action with parameters.
+        Execute a task described in natural language by creating and executing a plan.
         
         Args:
-            action: Action name
-            parameters: Action parameters
+            task_description: Natural language description of the task to execute
+            task_id: Optional task ID for tracking
             
         Returns:
-            Dictionary with action results, standardized format with 'status' field
+            Dictionary with execution results
         """
         try:
-            # Log action execution with parameters (excluding sensitive data)
-            safe_params = self._get_safe_params_for_logging(action, parameters)
-            logger.info(f"Executing action: {action} with parameters: {safe_params}")
+            logger.info(f"Executing task from natural language: {task_description}")
             
-            # Get the current task_id for WebSocket broadcasts
-            task_id = self.current_state.get("task_id")
+            # Ensure the agent is initialized
+            init_result = await self.ensure_initialized()
+            if init_result["status"] != "success":
+                return init_result
             
-            # Pass the task_id to the controller
-            action_result = await self.controller.execute_action(action, parameters, task_id)
+            # Set the current task ID for WebSocket updates
+            task_manager_instance = task_manager
+            task = task_manager_instance.get_task(task_id) if task_id else None
+            if task:
+                task.log(f"Processing task: {task_description}")
+                task.update_progress(0.1)  # 10% - Starting
             
-            # Handle success case
-            if action_result["status"] == "success":
-                logger.info(f"Action {action} executed successfully")
-                return {
-                    "status": "success",
-                    "action": action,
-                    "result": action_result["result"]
-                }
-            # Handle error case
-            else:
-                error_msg = action_result.get("message", "Unknown error")
-                logger.error(f"Action {action} failed: {error_msg}")
+            # Parse the task using the LLM
+            plan_result = await self.create_task_plan(
+                task_description, 
+                current_state=self.current_state
+            )
+            
+            if plan_result["status"] != "success":
+                return {"status": "error", "message": plan_result.get("message", "Failed to create task plan")}
+            
+            plan = plan_result["plan"]
+            steps = plan.get("steps", [])
+            
+            if task:
+                task.log(f"Created task plan with {len(steps)} steps")
+                task.update_progress(0.2)  # 20% - Plan created
+            
+            # No steps in the plan
+            if not steps:
+                return {"status": "error", "message": "No steps generated for task. Please provide a clearer task description."}
+            
+            # Execute each step in the plan
+            results = []
+            for index, step in enumerate(steps):
+                step_number = index + 1
+                step_total = len(steps)
+                step_progress = 0.2 + (0.7 * (step_number / step_total))  # 20% - 90% based on step progress
                 
-                # Update error state
-                self.current_state["last_error"] = error_msg
+                if task:
+                    task.log(f"Executing step {step_number}/{step_total}: {step['description']}")
+                    task.update_progress(step_progress)
                 
-                return {
-                    "status": "error",
-                    "action": action,
-                    "message": error_msg,
-                    "details": action_result.get("errors", {})
-                }
-        except Exception as e:
-            error_msg = f"Error executing action {action}: {str(e)}"
-            logger.exception(error_msg)
+                logger.info(f"Executing step {step_number}/{step_total}: {step['description']}")
+                
+                # Execute the step
+                step_result = await self.execute_step(step, task_id)
+                results.append(step_result)
+                
+                # Capture current screenshot after each step for real-time updates
+                screenshot_result = await self.capture_screenshot()
+                if screenshot_result["status"] == "success" and task_id:
+                    # Get the current browser state
+                    dom_result = await self.get_dom()
+                    page_state = dom_result.get("page_state", {}) if dom_result["status"] == "success" else {}
+                    
+                    # Broadcast updates after each step
+                    if self.controller:
+                        # Send screenshot update
+                        await self.controller._broadcast_screenshot_update(task_id, screenshot_result["screenshot"])
+                        
+                        # Send browser state update
+                        await self.controller._broadcast_browser_state_update(task_id, {
+                            "url": page_state.get("url", ""),
+                            "title": page_state.get("title", "")
+                        })
+                
+                # Stop execution if a step fails
+                if step_result["status"] != "success":
+                    if task:
+                        task.log(f"Step failed: {step_result.get('message', 'Unknown error')}")
+                    
+                    logger.warning(f"Step {step_number} failed: {step_result.get('message', 'Unknown error')}")
+                    return {
+                        "status": "error",
+                        "message": f"Step {step_number} failed: {step_result.get('message', 'Unknown error')}",
+                        "results": results
+                    }
             
-            # Update error state
-            self.current_state["last_error"] = error_msg
+            # Capture final screenshot and DOM state
+            final_screenshot = await self.capture_screenshot()
+            final_dom = await self.get_dom()
             
+            if task:
+                task.log("Task completed successfully")
+                task.update_progress(1.0)  # 100% - Complete
+            
+            logger.info(f"Task executed successfully with {len(steps)} steps")
             return {
-                "status": "error",
-                "action": action,
-                "message": error_msg
+                "status": "success",
+                "message": "Task executed successfully",
+                "step_count": len(steps),
+                "results": results,
+                "screenshot": final_screenshot.get("screenshot"),
+                "page_state": final_dom.get("page_state") if final_dom["status"] == "success" else None
             }
+        except Exception as e:
+            error_msg = f"Error executing task: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {"status": "error", "message": error_msg}
+
+    async def execute_action(self, action_name: str, action_params: Dict[str, Any], task_id: str = None) -> Dict[str, Any]:
+        """
+        Execute a single browser action.
+        
+        Args:
+            action_name: Name of the action to execute (e.g., "navigate_to_url")
+            action_params: Parameters for the action
+            task_id: Optional task ID for tracking
+            
+        Returns:
+            Dictionary with execution results
+        """
+        try:
+            # Ensure the agent is initialized
+            init_result = await self.ensure_initialized()
+            if init_result["status"] != "success":
+                return init_result
+            
+            # Log the action
+            logger.info(f"Executing action: {action_name} with params: {action_params}")
+            
+            # Execute the appropriate action
+            result = None
+            
+            if action_name == "navigate_to_url" or action_name == "go_to_url":
+                url = action_params.get("url")
+                if not url:
+                    return {"status": "error", "message": "Missing required parameter: url"}
+                
+                wait_until = action_params.get("wait_until", "networkidle")
+                result = await self.navigate_to_url(url, wait_until)
+                
+            elif action_name == "click_element":
+                selector = action_params.get("selector")
+                if not selector:
+                    return {"status": "error", "message": "Missing required parameter: selector"}
+                
+                index = action_params.get("index", 0)
+                timeout = action_params.get("timeout", 10000)
+                result = await self.click_element(selector, index, timeout)
+                
+            elif action_name == "input_text":
+                selector = action_params.get("selector")
+                text = action_params.get("text")
+                if not selector or text is None:
+                    return {"status": "error", "message": "Missing required parameters: selector and/or text"}
+                
+                delay = action_params.get("delay", 50)
+                result = await self.input_text(selector, text, delay)
+                
+            elif action_name == "get_dom":
+                result = await self.get_dom()
+                
+            elif action_name == "capture_screenshot":
+                full_page = action_params.get("full_page", True)
+                result = await self.capture_screenshot(full_page)
+                
+            elif action_name == "wait":
+                time_ms = action_params.get("time")
+                if time_ms is None:
+                    return {"status": "error", "message": "Missing required parameter: time"}
+                
+                result = await self.wait(time_ms)
+                
+            elif action_name == "select_option":
+                selector = action_params.get("selector")
+                value = action_params.get("value")
+                if not selector or value is None:
+                    return {"status": "error", "message": "Missing required parameters: selector and/or value"}
+                
+                result = await self.controller.execute_action("select_option", action_params)
+                
+            elif action_name == "check":
+                selector = action_params.get("selector")
+                if not selector:
+                    return {"status": "error", "message": "Missing required parameter: selector"}
+                
+                checked = action_params.get("checked", True)
+                result = await self.controller.execute_action("check", action_params)
+                
+            else:
+                return {"status": "error", "message": f"Unsupported action: {action_name}"}
+            
+            # Capture current screenshot after action for real-time updates if task_id is provided
+            if result["status"] == "success" and task_id and self.controller:
+                # Capture screenshot if not already included in the result
+                if "screenshot" not in result:
+                    screenshot_result = await self.capture_screenshot()
+                    if screenshot_result["status"] == "success":
+                        result["screenshot"] = screenshot_result["screenshot"]
+                
+                # Get page state if not already included
+                if "page_state" not in result:
+                    dom_result = await self.get_dom()
+                    if dom_result["status"] == "success":
+                        result["page_state"] = dom_result.get("page_state", {})
+                
+                # Broadcast updates after action
+                if "screenshot" in result:
+                    await self.controller._broadcast_screenshot_update(task_id, result["screenshot"])
+                
+                if "page_state" in result:
+                    await self.controller._broadcast_browser_state_update(task_id, {
+                        "url": result["page_state"].get("url", ""),
+                        "title": result["page_state"].get("title", "")
+                    })
+            
+            return result
+            
+        except Exception as e:
+            error_msg = f"Error executing action {action_name}: {str(e)}"
+            logger.error(error_msg)
+            return {"status": "error", "message": error_msg}
 
     def _get_safe_params_for_logging(self, action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -65,7 +65,6 @@ class ActionSequenceRequest(BaseModel):
 class NaturalLanguageTaskRequest(BaseModel):
     """Execute a task described in natural language"""
     task: str = Field(..., description="Natural language description of the task to execute")
-    include_raw_response: bool = Field(False, description="Include raw LLM response in the result")
     enable_multi_step: bool = Field(True, description="Enable multi-step task planning for complex tasks")
 
 class AgentResponse(BaseModel):
@@ -80,7 +79,7 @@ class TaskResponse(BaseModel):
     message: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     progress: Optional[float] = None
-    logs: Optional[List[str]] = None
+    logs: Optional[List[Dict[str, Any]]] = None
 
 class TaskPlanResponse(BaseModel):
     """Response model for task plans"""
@@ -118,7 +117,7 @@ async def run_agent_action(task_id: str, action_name: str, action_func, *args, *
         
         # Start the task
         task.start()
-        task.log(f"Executing {action_name}")
+        task.add_log(f"Executing {action_name}")
         
         # Execute the action
         result = await action_func(*args, **kwargs)
@@ -126,11 +125,11 @@ async def run_agent_action(task_id: str, action_name: str, action_func, *args, *
         # Update task based on result
         if result.get("status") == "success":
             task.complete(result)
-            task.log(f"Successfully executed {action_name}")
+            task.add_log(f"Successfully executed {action_name}")
         else:
             error_msg = result.get("message", f"Failed to execute {action_name}")
             task.fail(error_msg)
-            task.log(f"Error: {error_msg}")
+            task.add_log(f"Error: {error_msg}")
         
     except Exception as e:
         logger.error(f"Error executing {action_name}: {str(e)}")
@@ -139,7 +138,7 @@ async def run_agent_action(task_id: str, action_name: str, action_func, *args, *
         task = task_manager.get_task(task_id)
         if task:
             task.fail(str(e))
-            task.log(f"Exception: {str(e)}")
+            task.add_log(f"Exception: {str(e)}")
 
 # API routes
 @router.post("/initialize", response_model=TaskResponse)
@@ -415,8 +414,7 @@ async def execute_task(task: TaskRequest) -> TaskResponse:
     """
     try:
         # Create task
-        task_id = task.task_id or f"task_{int(time.time())}"
-        task_manager.create_task(task_id, task.description)
+        task_id = task_manager.create_task(task.description)
         
         # Execute task asynchronously
         async def execute():
@@ -485,11 +483,16 @@ async def get_task_status(task_id: str) -> TaskResponse:
                 status_code=404,
                 detail=f"Task not found: {task_id}"
             )
+        
+        # Get the latest log message if available
+        latest_message = None
+        if task.logs and len(task.logs) > 0:
+            latest_message = task.logs[-1].get("message")
             
         return TaskResponse(
             task_id=task_id,
             status=task.status,
-            message=task.message,
+            message=latest_message,
             result=task.result,
             progress=task.progress,
             logs=task.logs

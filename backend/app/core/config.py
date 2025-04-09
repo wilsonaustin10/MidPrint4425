@@ -22,12 +22,19 @@ class Settings(BaseSettings):
     API_KEY: Optional[str] = Field(default=None, description="API key for authentication")
     
     # Browser Settings
-    BROWSER_TYPE: str = Field(default="chromium", description="Type of browser to use: chromium, firefox, or webkit")
-    HEADLESS: bool = Field(default=True, description="Whether to run browser in headless mode")
+    BROWSER_TYPE: str = "chromium"
+    # Default headless mode, but allow for override via environment variable
+    HEADLESS: bool = os.getenv("HEADLESS", "False").lower() in ("true", "1", "t")
+    BROWSER_VIEWPORT_SIZE: str = os.getenv("BROWSER_VIEWPORT_SIZE", "1280,720")
     DEFAULT_VIEWPORT_WIDTH: int = Field(default=1280, description="Default viewport width")
     DEFAULT_VIEWPORT_HEIGHT: int = Field(default=800, description="Default viewport height")
     DEFAULT_TIMEOUT: int = Field(default=30000, description="Default timeout for browser operations in milliseconds")
     DEFAULT_NAVIGATION_TIMEOUT: int = Field(default=30000, description="Default timeout for navigation in milliseconds")
+    SLOW_MO: int = Field(default=50, description="Slow down browser operations by the specified amount of milliseconds")
+    USER_AGENT: Optional[str] = Field(
+        default="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+        description="User agent string to use in the browser"
+    )
     
     # LLM Settings
     OPENAI_API_KEY: Optional[str] = Field(default=None, description="OpenAI API key for language model integration")

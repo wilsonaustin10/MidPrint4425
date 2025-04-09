@@ -251,150 +251,140 @@ class ControllerService:
         Navigate to a URL.
         
         Args:
-            url: The URL to navigate to
-            wait_until: Navigation wait condition
+            url: URL to navigate to
+            wait_until: When to consider navigation finished
             
         Returns:
             Dictionary with navigation results
         """
-        # Start navigation
-        content = await self.browser.navigate(url)
-        screenshot = await self.browser.capture_screenshot()
-        page_state = await self.browser.get_page_state()
-        
-        # Broadcast screenshot and page state updates if a task is active
-        task_id = await self._get_current_task_id()
-        if task_id:
-            # Send regular updates
-            await self._broadcast_screenshot_update(task_id, screenshot)
-            await self._broadcast_browser_state_update(task_id, page_state)
+        try:
+            logger.info(f"Navigating to URL: {url}")
             
-            # Send navigation action feedback
-            action_data = {
-                "url": url,
-                "pageTitle": page_state.get("title", ""),
-                "timestamp": int(time.time() * 1000)
-            }
-            await self._broadcast_action_feedback(task_id, "navigation", action_data)
-        
-        return {
-            "url": url,
-            "content": content,
-            "screenshot": screenshot,
-            "page_state": page_state
-        }
+            # Get page state before navigation
+            old_url = await browser_manager.get_current_url()
+            
+            # Navigate to the URL
+            result = await browser_manager.navigate_to_url(url, wait_until)
+            
+            # Get task ID for WebSocket updates
+            task_id = await self._get_current_task_id()
+            
+            # Broadcast screenshot update via WebSocket if we have a task ID
+            if task_id and result.get("screenshot"):
+                await self._broadcast_screenshot_update(task_id, result["screenshot"])
+                
+                # Also broadcast browser state update
+                await self._broadcast_browser_state_update(task_id, {
+                    "url": url,
+                    "title": result.get("page_state", {}).get("title", "")
+                })
+                
+                # Broadcast navigation action feedback
+                await self._broadcast_action_feedback(task_id, "navigate", {
+                    "from": old_url,
+                    "to": url
+                })
+            
+            return result
+        except Exception as e:
+            logger.error(f"Error navigating to URL: {str(e)}")
+            return {"status": "error", "message": str(e)}
     
     async def _click_element(self, selector: str, timeout: int = 10000) -> Dict[str, Any]:
         """
-        Click on an element identified by selector.
+        Click an element.
         
         Args:
-            selector: CSS selector of the element to click
-            timeout: Maximum time to wait for the element
+            selector: CSS selector of element to click
+            timeout: Maximum time to wait for the element in milliseconds
             
         Returns:
             Dictionary with click results
         """
-        page = self.browser.page
         try:
-            element = await page.wait_for_selector(selector, timeout=timeout)
-            if not element:
-                return {"success": False, "message": f"Element not found: {selector}"}
+            logger.info(f"Clicking element with selector: {selector}")
             
-            # Get element position before clicking for action feedback
-            position = await element.bounding_box()
+            # Get element position for action feedback
+            element_info = await browser_manager.get_element_info(selector)
             
             # Click the element
-            await element.click()
+            result = await browser_manager.click_element(selector, timeout)
             
-            # Capture updated state
-            screenshot = await self.browser.capture_screenshot()
-            page_state = await self.browser.get_page_state()
-            
-            # Broadcast updates if a task is active
+            # Get task ID for WebSocket updates
             task_id = await self._get_current_task_id()
-            if task_id:
-                # Broadcast screenshot and page state
-                await self._broadcast_screenshot_update(task_id, screenshot)
-                await self._broadcast_browser_state_update(task_id, page_state)
-                
-                # Broadcast action feedback with click coordinates
-                if position:
-                    action_data = {
-                        "selector": selector,
-                        "x": position["x"] + (position["width"] / 2),  # Center X of element
-                        "y": position["y"] + (position["height"] / 2),  # Center Y of element
-                        "width": position["width"],
-                        "height": position["height"]
-                    }
-                    await self._broadcast_action_feedback(task_id, "click", action_data)
             
-            return {
-                "success": True,
-                "selector": selector,
-                "screenshot": screenshot,
-                "page_state": page_state
-            }
+            # Broadcast screenshot and state updates via WebSocket if we have a task ID
+            if task_id and result.get("screenshot"):
+                await self._broadcast_screenshot_update(task_id, result["screenshot"])
+                
+                # Also broadcast browser state update if URL changed
+                page_state = result.get("page_state", {})
+                if page_state:
+                    await self._broadcast_browser_state_update(task_id, {
+                        "url": page_state.get("url", ""),
+                        "title": page_state.get("title", "")
+                    })
+                
+                # Broadcast click action feedback
+                action_data = {"selector": selector}
+                if element_info and "boundingBox" in element_info:
+                    box = element_info["boundingBox"]
+                    action_data.update({
+                        "x": box["x"] + box["width"] / 2,
+                        "y": box["y"] + box["height"] / 2
+                    })
+                await self._broadcast_action_feedback(task_id, "click", action_data)
+            
+            return result
         except Exception as e:
-            return {"success": False, "message": str(e)}
+            logger.error(f"Error clicking element: {str(e)}")
+            return {"status": "error", "message": str(e)}
     
     async def _input_text(self, selector: str, text: str, delay: int = 50) -> Dict[str, Any]:
         """
-        Enter text into an input field.
+        Input text into an element.
         
         Args:
-            selector: CSS selector of the input element
-            text: Text to enter
+            selector: CSS selector of input element
+            text: Text to input
             delay: Delay between keypresses in milliseconds
             
         Returns:
             Dictionary with input results
         """
-        page = self.browser.page
         try:
-            element = await page.wait_for_selector(selector)
-            if not element:
-                return {"success": False, "message": f"Element not found: {selector}"}
+            logger.info(f"Inputting text into element with selector: {selector}")
             
-            # Get element position before typing for action feedback
-            position = await element.bounding_box()
+            # Get element position for action feedback
+            element_info = await browser_manager.get_element_info(selector)
             
-            # Clear the field and type the text
-            await element.fill("")  # Clear the field first
-            await element.type(text, delay=delay)
+            # Input the text
+            result = await browser_manager.input_text(selector, text, delay)
             
-            # Capture updated state
-            screenshot = await self.browser.capture_screenshot()
-            page_state = await self.browser.get_page_state()
-            
-            # Broadcast updates if a task is active
+            # Get task ID for WebSocket updates
             task_id = await self._get_current_task_id()
-            if task_id:
-                # Broadcast screenshot and page state
-                await self._broadcast_screenshot_update(task_id, screenshot)
-                await self._broadcast_browser_state_update(task_id, page_state)
-                
-                # Broadcast action feedback with typing information
-                if position:
-                    action_data = {
-                        "selector": selector,
-                        "x": position["x"] + (position["width"] / 2),  # Center X of element
-                        "y": position["y"] + (position["height"] / 2),  # Center Y of element
-                        "content": text,
-                        "width": position["width"],
-                        "height": position["height"]
-                    }
-                    await self._broadcast_action_feedback(task_id, "typing", action_data)
             
-            return {
-                "success": True,
-                "selector": selector,
-                "text": text,
-                "screenshot": screenshot,
-                "page_state": page_state
-            }
+            # Broadcast screenshot update via WebSocket if we have a task ID
+            if task_id and result.get("screenshot"):
+                await self._broadcast_screenshot_update(task_id, result["screenshot"])
+                
+                # Broadcast typing action feedback
+                action_data = {
+                    "selector": selector,
+                    "content": "●●●●●●"  # Mask actual text for privacy
+                }
+                if element_info and "boundingBox" in element_info:
+                    box = element_info["boundingBox"]
+                    action_data.update({
+                        "x": box["x"] + box["width"] / 2,
+                        "y": box["y"] + box["height"] / 2
+                    })
+                await self._broadcast_action_feedback(task_id, "typing", action_data)
+            
+            return result
         except Exception as e:
-            return {"success": False, "message": str(e)}
+            logger.error(f"Error inputting text: {str(e)}")
+            return {"status": "error", "message": str(e)}
     
     async def _get_dom(self) -> Dict[str, Any]:
         """

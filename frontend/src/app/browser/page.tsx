@@ -346,175 +346,113 @@ export default function BrowserPage() {
     return () => clearInterval(logInterval);
   }, []);
 
-  // WebSocket global message handling
-  useEffect(() => {
-    const handleWebSocketMessage = (message: WebSocketMessage) => {
-      if (message.type === 'browser_screenshot_update' && message.screenshot) {
-        // Track receive time for performance metrics
-        const receiveTime = Date.now();
-        PERF_METRICS.screenshotsReceived++;
-        PERF_METRICS.lastReceiveTime = receiveTime;
-        
-        // Start performance measurement
-        const startRenderTime = performance.now();
-        
-        // Update screenshot with the new image
-        debouncedSetScreenshot(message.screenshot);
-        setIsLoading(false);
-        
-        // Calculate render time
-        const renderTime = performance.now() - startRenderTime;
-        PERF_METRICS.renderTimes.push(renderTime);
-        PERF_METRICS.totalRenderTime += renderTime;
-        PERF_METRICS.screenshotsRendered++;
-        
-        // Keep only last 100 render times for averages
-        if (PERF_METRICS.renderTimes.length > 100) {
-          PERF_METRICS.renderTimes.shift();
-        }
-        
-        // Update average render time
-        PERF_METRICS.avgRenderTime = PERF_METRICS.totalRenderTime / PERF_METRICS.screenshotsRendered;
-        
-        // Detect dropped frames
-        if (renderTime > 100) { // Threshold for considering a frame "dropped"
-          PERF_METRICS.droppedFrames++;
-          
-          // If we're dropping too many frames, reduce quality
-          if (PERF_METRICS.droppedFrames > 5 && PERF_METRICS.screenshotsRendered > 20) {
-            const dropRate = PERF_METRICS.droppedFrames / PERF_METRICS.screenshotsRendered;
-            if (dropRate > 0.2 && screenshotConfig.quality > 50) {
-              // Auto-reduce quality
-              const newQuality = Math.max(40, screenshotConfig.quality - 10);
-              console.log(`Auto-reducing screenshot quality to ${newQuality} due to performance issues`);
-              configureScreenshot({ quality: newQuality });
-            }
-          }
-        }
-      }
-      
-      if (message.type === 'browser_state_update') {
-        // Validate URL
-        if (message.currentUrl) {
-          try {
-            const urlObj = new URL(message.currentUrl);
-            // Only update if it's a valid URL and different from current URL
-            if (urlObj.href !== url) {
-              setUrl(urlObj.href);
-              setTransitionState('starting');
-              
-              // Reset transition state after a delay
-              setTimeout(() => {
-                setTransitionState('idle');
-              }, 1500);
-            }
-          } catch (e) {
-            console.warn('Received invalid URL in browser_state_update:', message.currentUrl);
-          }
-        }
-        
-        // Add page title with validation
-        if (message.pageTitle && typeof message.pageTitle === 'string') {
-          // Truncate very long titles for safety
-          const sanitizedTitle = message.pageTitle.slice(0, 500);
-          if (sanitizedTitle !== pageTitle) {
-            setPageTitle(sanitizedTitle);
-          }
-        }
-        
-        // Update loading state based on navigation status if provided
-        if (message.isLoading !== undefined) {
-          setIsLoading(!!message.isLoading);
-          
-          // If page finished loading, update visual state
-          if (!message.isLoading && transitionState === 'starting') {
-            setTransitionState('completed');
-            setTimeout(() => {
-              setTransitionState('idle');
-            }, 500);
-          }
-        }
-      }
-      
-      // Handle action feedback messages for visual indicators
-      if (message.type === 'browser_action_feedback' && message.actionType) {
-        const { actionType, data, timestamp } = message;
-        
-        switch (actionType) {
-          case 'click':
-            if (data && typeof data.x === 'number' && typeof data.y === 'number') {
-              addClickIndicator(data.x, data.y);
-              
-              // Highlight the clicked element if dimensions are provided
-              if (data.width && data.height) {
-                highlightElement({
-                  id: `click-${timestamp}`,
-                  x: data.x - (data.width / 2),
-                  y: data.y - (data.height / 2),
-                  width: data.width,
-                  height: data.height,
-                  type: 'target',
-                  label: 'Clicked'
-                });
-              }
-            }
-            break;
-          
-          case 'typing':
-            if (data && typeof data.x === 'number' && typeof data.y === 'number') {
-              // Show the typing indicator with actual content
-              const displayContent = data.content
-                ? (data.content.length > 20 ? `${data.content.substring(0, 20)}...` : data.content)
-                : 'Typing...';
-              
-              addTypingIndicator(data.x, data.y, displayContent);
-              
-              // Highlight the input field
-              if (data.width && data.height) {
-                highlightElement({
-                  id: `input-${timestamp}`,
-                  x: data.x - (data.width / 2),
-                  y: data.y - (data.height / 2),
-                  width: data.width,
-                  height: data.height,
-                  type: 'focus',
-                  label: 'Text Input'
-                });
-              }
-            }
-            break;
-          
-          case 'navigation':
-            // Add navigation indicator for the entire page
-            addNavigationIndicator();
-            break;
-          
-          case 'scroll':
-            if (data && typeof data.x === 'number' && typeof data.y === 'number') {
-              const direction = data.direction || 'down';
-              addScrollIndicator(data.x, data.y, direction as 'up' | 'down');
-            }
-            break;
-          
-          case 'hover':
-            if (data && typeof data.x === 'number' && typeof data.y === 'number') {
-              addHoverIndicator(data.x, data.y);
-            }
-            break;
-          
-          default:
-            // Unknown action type, log for debugging
-            console.log('Unknown action feedback type:', actionType, data);
-        }
-      }
-    };
+  // Handle WebSocket messages
+  const handleWebSocketMessage = useCallback((message: WebSocketMessage) => {
+    console.log('WebSocket message:', message);
     
-    const unsubscribe = websocketService.addMessageHandler(handleWebSocketMessage);
+    // Check message type
+    if (message.type === 'browser_screenshot_update') {
+      // Update screenshot
+      PERF_METRICS.screenshotsReceived++;
+      PERF_METRICS.lastReceiveTime = Date.now();
+      debouncedSetScreenshot(message.screenshot);
+    } 
+    else if (message.type === 'browser_state_update') {
+      // Update URL and title
+      setUrl(message.currentUrl || '');
+      setPageTitle(message.pageTitle || '');
+    }
+    else if (message.type === 'browser_action_feedback') {
+      // Add appropriate action indicator
+      const id = `action_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      
+      if (message.actionType === 'click' && message.data?.x !== undefined && message.data?.y !== undefined) {
+        const newIndicator: ActionIndicator = {
+          id,
+          type: 'click',
+          x: message.data.x,
+          y: message.data.y,
+          timestamp: Date.now(),
+          duration: 2000
+        };
+        setActionIndicators(prev => [...prev, newIndicator]);
+      }
+      else if (message.actionType === 'typing' && message.data?.x !== undefined && message.data?.y !== undefined) {
+        const newIndicator: ActionIndicator = {
+          id,
+          type: 'typing',
+          x: message.data.x,
+          y: message.data.y,
+          timestamp: Date.now(),
+          content: message.data.content || 'Typing...',
+          duration: 3000
+        };
+        setActionIndicators(prev => [...prev, newIndicator]);
+      }
+      else if (message.actionType === 'navigate') {
+        const newIndicator: ActionIndicator = {
+          id,
+          type: 'navigation',
+          x: 0,
+          y: 0,
+          timestamp: Date.now(),
+          duration: 2000
+        };
+        setActionIndicators(prev => [...prev, newIndicator]);
+      }
+      else if (message.actionType === 'scroll' && message.data?.x !== undefined && message.data?.y !== undefined) {
+        const newIndicator: ActionIndicator = {
+          id,
+          type: 'scroll',
+          x: message.data.x,
+          y: message.data.y,
+          timestamp: Date.now(),
+          direction: message.data.direction as 'up' | 'down',
+          duration: 1500
+        };
+        setActionIndicators(prev => [...prev, newIndicator]);
+      }
+      else if (message.actionType === 'hover' && message.data?.x !== undefined && message.data?.y !== undefined) {
+        const newIndicator: ActionIndicator = {
+          id,
+          type: 'hover',
+          x: message.data.x,
+          y: message.data.y,
+          timestamp: Date.now(),
+          duration: 1500
+        };
+        setActionIndicators(prev => [...prev, newIndicator]);
+      }
+    }
+    // Handle other message types as needed
+  }, [debouncedSetScreenshot]);
+
+  // Subscribe to WebSocket updates when current task changes
+  useEffect(() => {
+    // Clear previous subscription
+    if (wsSubscriptionRef.current) {
+      wsSubscriptionRef.current();
+      wsSubscriptionRef.current = null;
+    }
+    
+    // If we have a current task, subscribe to its updates
+    if (currentTask && currentTask.id) {
+      const unsubscribe = websocketService.subscribeToTask(
+        currentTask.id,
+        handleWebSocketMessage
+      );
+      wsSubscriptionRef.current = unsubscribe;
+      
+      console.log(`Subscribed to WebSocket updates for task ${currentTask.id}`);
+    }
     
     return () => {
-      unsubscribe();
+      if (wsSubscriptionRef.current) {
+        wsSubscriptionRef.current();
+        wsSubscriptionRef.current = null;
+      }
     };
-  }, [url, pageTitle, transitionState, screenshotConfig]);
+  }, [currentTask, handleWebSocketMessage]);
 
   const addClickIndicator = (x: number, y: number) => {
     const newIndicator: ActionIndicator = {

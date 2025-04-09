@@ -1,4 +1,4 @@
-#!/Users/austinwilson/.cursor/MidPrint4.4.25/e2e-tests/.venv/bin/python
+#!/Users/austinwilson/.cursor/MidPrint4.4.25/e2e-tests/.venv/bin/python3.11
 # -*- coding: utf-8 -*-
 import re
 import sys

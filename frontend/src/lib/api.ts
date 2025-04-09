@@ -174,11 +174,10 @@ export const agentAPI = {
   },
   
   // Execute natural language task
-  executeTask: async (task: string, includeRawResponse = false) => {
+  executeTask: async (task: string) => {
     try {
       const response = await api.post('/agent/execute', { 
-        task, 
-        include_raw_response: includeRawResponse 
+        description: task
       });
       return response.data;
     } catch (error) {

@@ -166,6 +166,52 @@ const InteractiveBrowser: React.FC<InteractiveBrowserProps> = ({
     }
   }, [screenshot]);
   
+  // Process action indicators when they come in from props
+  useEffect(() => {
+    if (actionIndicators && actionIndicators.length > 0) {
+      // Add new indicators to visible indicators
+      setVisibleIndicators(prev => {
+        // Filter out duplicates by ID
+        const newIndicators = actionIndicators.filter(
+          indicator => !prev.some(existing => existing.id === indicator.id)
+        );
+        return [...prev, ...newIndicators];
+      });
+
+      // Set up timeouts to remove indicators after their duration
+      actionIndicators.forEach(indicator => {
+        const duration = indicator.duration || 3000; // Default duration: 3 seconds
+        setTimeout(() => {
+          setVisibleIndicators(prev => 
+            prev.filter(i => i.id !== indicator.id)
+          );
+        }, duration);
+      });
+    }
+  }, [actionIndicators]);
+
+  // Process individual action indicators when page state changes
+  useEffect(() => {
+    if (pageTitle || currentUrl) {
+      // Current page has loaded, potentially show updated action indicators
+      // based on real-time WebSocket updates
+    }
+  }, [pageTitle, currentUrl]);
+  
+  // Handle automatic refresh (NOTE: This polling can be disabled once WebSocket updates are working)
+  /*
+  useEffect(() => {
+    // Only set up polling if the component is fully loaded and a refresh handler is provided
+    if (!isLoading && onRefresh) {
+      const intervalId = setInterval(() => {
+        onRefresh();
+      }, 5000); // Poll every 5 seconds for updates
+      
+      return () => clearInterval(intervalId);
+    }
+  }, [isLoading, onRefresh]);
+  */
+
   // URL change detection for transitions and history tracking
   useEffect(() => {
     if (currentUrl) {
@@ -199,27 +245,6 @@ const InteractiveBrowser: React.FC<InteractiveBrowserProps> = ({
       }
     }
   }, [currentUrl, previousUrl, urlHistory]);
-  
-  // Handle action indicators - add new ones and remove old ones after a timeout
-  useEffect(() => {
-    if (actionIndicators.length > 0) {
-      // Add any new indicators
-      setVisibleIndicators(prev => [...prev, ...actionIndicators]);
-      
-      // Set up cleanup for indicators after they've been displayed for a while
-      const now = Date.now();
-      const timeoutId = setTimeout(() => {
-        setVisibleIndicators(prev => 
-          prev.filter(indicator => {
-            const duration = indicator.duration || 2000; // Default to 2 seconds if not specified
-            return now - indicator.timestamp < duration;
-          })
-        );
-      }, 3000); // Changed from 2000 to 3000 for longer visibility
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [actionIndicators]);
 
   // Validate URL format
   const validateUrl = (url: string): boolean => {

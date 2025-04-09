@@ -17,7 +17,7 @@ router = APIRouter()
 
 # Define request and response models
 class TaskResponse(BaseModel):
-    id: str
+    task_id: str
     description: str
     status: str
     created_at: str
@@ -55,7 +55,11 @@ async def get_tasks(
     if status:
         try:
             task_status = TaskStatus[status.upper()]
-            tasks = [task for task in tasks if task.status == task_status]
+            # Handle tasks being either dictionary or Task objects
+            if tasks and isinstance(tasks[0], dict):
+                tasks = [task for task in tasks if task["status"] == task_status]
+            else:
+                tasks = [task for task in tasks if task.status == task_status]
         except KeyError:
             valid_statuses = [s.name for s in TaskStatus]
             raise HTTPException(
@@ -66,8 +70,8 @@ async def get_tasks(
     # Apply pagination
     tasks = tasks[skip:skip+limit]
     
-    # Convert tasks to response model
-    return [TaskResponse(**task.to_dict()) for task in tasks]
+    # Convert tasks to response model - handle Task objects or dictionaries
+    return [TaskResponse(**task) if isinstance(task, dict) else TaskResponse(**task.to_dict()) for task in tasks]
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(
@@ -95,7 +99,9 @@ async def get_task(
             detail=f"Task with ID '{task_id}' not found"
         )
     
-    # Convert task to response model
+    # Convert task to response model, handling dict or Task object
+    if isinstance(task, dict):
+        return TaskResponse(**task)
     return TaskResponse(**task.to_dict())
 
 @router.delete("/tasks/{task_id}")

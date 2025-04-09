@@ -210,6 +210,46 @@ class TaskManager:
         logger.info(f"Created task {task_id}: {description}")
         return task_id
     
+    def fail(self, task_id: str, error: str) -> bool:
+        """
+        Mark a task as failed.
+        
+        Args:
+            task_id: Task ID
+            error: Error message
+            
+        Returns:
+            True if the task was found and marked as failed, False otherwise
+        """
+        task = self.get_task(task_id)
+        if not task:
+            logger.error(f"Cannot fail task {task_id}: Task not found")
+            return False
+            
+        task.fail(error)
+        asyncio.create_task(self._notify_task_update(task_id))
+        return True
+    
+    def complete(self, task_id: str, result: Dict[str, Any]) -> bool:
+        """
+        Mark a task as completed.
+        
+        Args:
+            task_id: Task ID
+            result: Result data
+            
+        Returns:
+            True if the task was found and marked as completed, False otherwise
+        """
+        task = self.get_task(task_id)
+        if not task:
+            logger.error(f"Cannot complete task {task_id}: Task not found")
+            return False
+            
+        task.complete(result)
+        asyncio.create_task(self._notify_task_update(task_id))
+        return True
+    
     def get_task(self, task_id: str) -> Optional[Task]:
         """
         Get a task by ID.

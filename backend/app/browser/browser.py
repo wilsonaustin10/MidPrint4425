@@ -56,6 +56,7 @@ class BrowserManager:
                 elif browser_type == "webkit":
                     browser_launcher = self.playwright.webkit
                 else:
+                    logger.warning(f"Unknown browser type {browser_type}, defaulting to chromium")
                     browser_launcher = self.playwright.chromium
                 
                 # Set up browser arguments and launch options
@@ -72,21 +73,35 @@ class BrowserManager:
                         '--no-sandbox',  # Add for more stability
                         '--disable-setuid-sandbox',
                         '--disable-dev-shm-usage',  # Handle low memory situations better
-                        '--single-process'  # Try single process mode for stability
+                        '--disable-gpu',  # Disable GPU hardware acceleration
+                        '--disable-software-rasterizer',  # Disable software rasterizer
                     ]
+                    
+                    # Add headless-specific arguments when in headless mode
+                    if settings.HEADLESS:
+                        browser_args.append('--headless=new')  # Use the new headless mode
                 
                 # Launch the browser with configured options
                 self.browser = await browser_launcher.launch(
                     headless=settings.HEADLESS,
-                    args=browser_args
+                    args=browser_args,
+                    slow_mo=settings.SLOW_MO
                 )
                 
-                # Create a browser context with additional options
+                # Create a browser context with specific user agent and viewport
                 context_options = {
-                    "viewport": {"width": 1280, "height": 800},
-                    "ignore_https_errors": True,
-                    "java_script_enabled": True,
+                    "viewport": {
+                        "width": settings.BROWSER_VIEWPORT_SIZE[0],
+                        "height": settings.BROWSER_VIEWPORT_SIZE[1],
+                    },
+                    "ignore_https_errors": True
                 }
+                
+                # Add user agent if configured
+                if hasattr(settings, 'USER_AGENT') and settings.USER_AGENT:
+                    context_options["user_agent"] = settings.USER_AGENT
+                else:
+                    context_options["user_agent"] = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 
                 self.context = await self.browser.new_context(**context_options)
                 
@@ -104,19 +119,14 @@ class BrowserManager:
                 self.is_initialized = True
                 self.last_error = None
                 return
-                
             except Exception as e:
-                last_error = str(e)
-                self.last_error = last_error
                 retry_count += 1
-                
-                # Clean up resources before retry
-                await self._cleanup()
-                
-                if retry_count < max_retries:
-                    await asyncio.sleep(1)  # Wait before retrying
-                
-        raise Exception(f"Failed to initialize browser after {max_retries} attempts. Last error: {last_error}")
+                last_error = f"Initialization error: {str(e)}"
+                logger.error(last_error)
+                await asyncio.sleep(1)  # Wait between retries
+        
+        self.last_error = last_error
+        raise Exception(f"Failed to initialize browser after {max_retries} attempts: {last_error}")
     
     async def _cleanup(self) -> None:
         """

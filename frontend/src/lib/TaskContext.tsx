@@ -224,6 +224,37 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
             updateLocalTask(currentTask.id, { result: data.result });
           }
           
+          // Handle the specific browser_screenshot_update message type
+          if (data.type === 'browser_screenshot_update' && data.screenshot) {
+            updateLocalTask(currentTask.id, { screenshot_data: data.screenshot });
+          }
+          
+          // Handle the browser_state_update message type
+          if (data.type === 'browser_state_update') {
+            const pageState = {
+              ...(currentTask.page_state || {}),
+              currentUrl: data.currentUrl,
+              pageTitle: data.pageTitle
+            };
+            updateLocalTask(currentTask.id, { page_state: pageState });
+          }
+          
+          // Handle the browser_action_feedback message type
+          if (data.type === 'browser_action_feedback') {
+            // We will use this in InteractiveBrowser component
+            // Just update the page_state with action indicators
+            const pageState = {
+              ...(currentTask.page_state || {}),
+              lastAction: {
+                type: data.actionType,
+                data: data.data,
+                timestamp: data.timestamp
+              }
+            };
+            updateLocalTask(currentTask.id, { page_state: pageState });
+          }
+          
+          // Legacy handling for older screenshot updates
           if (data.screenshot) {
             updateLocalTask(currentTask.id, { screenshot_data: data.screenshot });
           }
